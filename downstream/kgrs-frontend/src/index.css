@@ -1,0 +1,8 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  background-color: #0f172a; /* 醫療深色模式背景 */
+  color: #f8fafc;
+}

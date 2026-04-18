@@ -1,0 +1,1046 @@
+[
+  {
+    "index": 0,
+    "name": "Precentral_L",
+    "hemisphere": "L",
+    "lobe": "Frontal",
+    "function": "Primary motor cortex; voluntary movement execution",
+    "ad_relevance": "low",
+    "notes": "Relatively preserved in early AD; affected in late-stage motor decline"
+  },
+  {
+    "index": 1,
+    "name": "Precentral_R",
+    "hemisphere": "R",
+    "lobe": "Frontal",
+    "function": "Primary motor cortex; voluntary movement execution",
+    "ad_relevance": "low",
+    "notes": "Relatively preserved in early AD; affected in late-stage motor decline"
+  },
+  {
+    "index": 2,
+    "name": "Frontal_Sup_L",
+    "hemisphere": "L",
+    "lobe": "Frontal",
+    "function": "Superior frontal gyrus; executive function, working memory, planning",
+    "ad_relevance": "medium",
+    "notes": "Shows reduced FC with posterior regions in MCI; part of cognitive control network"
+  },
+  {
+    "index": 3,
+    "name": "Frontal_Sup_R",
+    "hemisphere": "R",
+    "lobe": "Frontal",
+    "function": "Superior frontal gyrus; executive function, working memory, planning",
+    "ad_relevance": "medium",
+    "notes": "Shows reduced FC with posterior regions in MCI; part of cognitive control network"
+  },
+  {
+    "index": 4,
+    "name": "Frontal_Sup_Orb_L",
+    "hemisphere": "L",
+    "lobe": "Frontal",
+    "function": "Superior frontal gyrus orbital part; emotion regulation, reward processing",
+    "ad_relevance": "medium",
+    "notes": "OFC connected to limbic system; shows tau pathology in mid-stage AD"
+  },
+  {
+    "index": 5,
+    "name": "Frontal_Sup_Orb_R",
+    "hemisphere": "R",
+    "lobe": "Frontal",
+    "function": "Superior frontal gyrus orbital part; emotion regulation, reward processing",
+    "ad_relevance": "medium",
+    "notes": "OFC connected to limbic system; shows tau pathology in mid-stage AD"
+  },
+  {
+    "index": 6,
+    "name": "Frontal_Mid_L",
+    "hemisphere": "L",
+    "lobe": "Frontal",
+    "function": "Middle frontal gyrus (DLPFC); executive function, working memory, top-down attention",
+    "ad_relevance": "high",
+    "notes": "FPN hub; FC disruption with parietal regions is early MCI marker; left DLPFC critical for episodic memory encoding"
+  },
+  {
+    "index": 7,
+    "name": "Frontal_Mid_R",
+    "hemisphere": "R",
+    "lobe": "Frontal",
+    "function": "Middle frontal gyrus (DLPFC); executive function, working memory, top-down attention",
+    "ad_relevance": "high",
+    "notes": "FPN hub; right DLPFC involved in attention control; FC changes correlate with cognitive scores"
+  },
+  {
+    "index": 8,
+    "name": "Frontal_Mid_Orb_L",
+    "hemisphere": "L",
+    "lobe": "Frontal",
+    "function": "Middle frontal gyrus orbital part; decision-making, impulse control",
+    "ad_relevance": "medium",
+    "notes": "Part of ventromedial prefrontal circuit; affected in behavioral variant frontotemporal dementia"
+  },
+  {
+    "index": 9,
+    "name": "Frontal_Mid_Orb_R",
+    "hemisphere": "R",
+    "lobe": "Frontal",
+    "function": "Middle frontal gyrus orbital part; decision-making, impulse control",
+    "ad_relevance": "medium",
+    "notes": "Part of ventromedial prefrontal circuit; affected in behavioral variant frontotemporal dementia"
+  },
+  {
+    "index": 10,
+    "name": "Frontal_Inf_Oper_L",
+    "hemisphere": "L",
+    "lobe": "Frontal",
+    "function": "Inferior frontal gyrus opercular part (Broca's area); speech production, phonological processing",
+    "ad_relevance": "low",
+    "notes": "Language production; affected in logopenic variant PPA; VAN node"
+  },
+  {
+    "index": 11,
+    "name": "Frontal_Inf_Oper_R",
+    "hemisphere": "R",
+    "lobe": "Frontal",
+    "function": "Inferior frontal gyrus opercular part; prosody, pragmatic language",
+    "ad_relevance": "low",
+    "notes": "Right hemisphere language prosody; VAN node"
+  },
+  {
+    "index": 12,
+    "name": "Frontal_Inf_Tri_L",
+    "hemisphere": "L",
+    "lobe": "Frontal",
+    "function": "Inferior frontal gyrus triangular part (Broca's area); semantic processing, language comprehension",
+    "ad_relevance": "low",
+    "notes": "Core language area; semantic memory access"
+  },
+  {
+    "index": 13,
+    "name": "Frontal_Inf_Tri_R",
+    "hemisphere": "R",
+    "lobe": "Frontal",
+    "function": "Inferior frontal gyrus triangular part; pragmatic comprehension, inference",
+    "ad_relevance": "low",
+    "notes": "Discourse-level language processing"
+  },
+  {
+    "index": 14,
+    "name": "Frontal_Inf_Orb_L",
+    "hemisphere": "L",
+    "lobe": "Frontal",
+    "function": "Inferior frontal gyrus orbital part; semantic memory, response inhibition",
+    "ad_relevance": "medium",
+    "notes": "VAN node; connected to limbic-OFC circuit; affected in semantic dementia"
+  },
+  {
+    "index": 15,
+    "name": "Frontal_Inf_Orb_R",
+    "hemisphere": "R",
+    "lobe": "Frontal",
+    "function": "Inferior frontal gyrus orbital part; emotional semantic processing",
+    "ad_relevance": "medium",
+    "notes": "VAN node; reward-based inhibitory control"
+  },
+  {
+    "index": 16,
+    "name": "Rolandic_Oper_L",
+    "hemisphere": "L",
+    "lobe": "Frontal",
+    "function": "Rolandic operculum; speech articulation, swallowing coordination",
+    "ad_relevance": "low",
+    "notes": "Motor-sensory integration for orofacial movements"
+  },
+  {
+    "index": 17,
+    "name": "Rolandic_Oper_R",
+    "hemisphere": "R",
+    "lobe": "Frontal",
+    "function": "Rolandic operculum; speech articulation, swallowing coordination",
+    "ad_relevance": "low",
+    "notes": "Motor-sensory integration for orofacial movements"
+  },
+  {
+    "index": 18,
+    "name": "Supp_Motor_Area_L",
+    "hemisphere": "L",
+    "lobe": "Frontal",
+    "function": "Supplementary motor area; motor planning, sequential movement, bilateral coordination",
+    "ad_relevance": "low",
+    "notes": "Pre-movement planning; connected to basal ganglia; SMN-adjacent"
+  },
+  {
+    "index": 19,
+    "name": "Supp_Motor_Area_R",
+    "hemisphere": "R",
+    "lobe": "Frontal",
+    "function": "Supplementary motor area; motor planning, sequential movement, bilateral coordination",
+    "ad_relevance": "low",
+    "notes": "Pre-movement planning; connected to basal ganglia; SMN-adjacent"
+  },
+  {
+    "index": 20,
+    "name": "Olfactory_L",
+    "hemisphere": "L",
+    "lobe": "Frontal",
+    "function": "Olfactory cortex / piriform cortex; primary olfactory processing, emotional memory",
+    "ad_relevance": "high",
+    "notes": "CRITICAL EARLY BIOMARKER: Braak Stage I-II tau accumulation begins here; olfactory deficits are among earliest AD symptoms (3-5 years before diagnosis); connected to entorhinal cortex and hippocampus via perforant path"
+  },
+  {
+    "index": 21,
+    "name": "Olfactory_R",
+    "hemisphere": "R",
+    "lobe": "Frontal",
+    "function": "Olfactory cortex / piriform cortex; primary olfactory processing, emotional memory",
+    "ad_relevance": "high",
+    "notes": "CRITICAL EARLY BIOMARKER: Braak Stage I-II tau accumulation begins here; olfactory deficits are among earliest AD symptoms; model shows this as top AD-discriminative ROI in MCI vs AD task"
+  },
+  {
+    "index": 22,
+    "name": "Frontal_Sup_Med_L",
+    "hemisphere": "L",
+    "lobe": "Frontal",
+    "function": "Medial superior frontal gyrus; self-referential processing, social cognition, mentalizing",
+    "ad_relevance": "high",
+    "notes": "DMN node; default mode hub; shows hypometabolism in early AD; involved in autobiographical memory retrieval"
+  },
+  {
+    "index": 23,
+    "name": "Frontal_Sup_Med_R",
+    "hemisphere": "R",
+    "lobe": "Frontal",
+    "function": "Medial superior frontal gyrus; self-referential processing, social cognition, mentalizing",
+    "ad_relevance": "high",
+    "notes": "DMN node; default mode hub; shows hypometabolism in early AD"
+  },
+  {
+    "index": 24,
+    "name": "Frontal_Med_Orb_L",
+    "hemisphere": "L",
+    "lobe": "Frontal",
+    "function": "Medial orbitofrontal cortex; emotion-cognition integration, moral reasoning",
+    "ad_relevance": "high",
+    "notes": "DMN node; vmPFC; critical for emotion regulation and social decision-making; Aβ deposition observed in preclinical AD"
+  },
+  {
+    "index": 25,
+    "name": "Frontal_Med_Orb_R",
+    "hemisphere": "R",
+    "lobe": "Frontal",
+    "function": "Medial orbitofrontal cortex; emotion-cognition integration, moral reasoning",
+    "ad_relevance": "high",
+    "notes": "DMN node; vmPFC; connected to amygdala and hippocampus; affected in behavioral symptoms of AD"
+  },
+  {
+    "index": 26,
+    "name": "Rectus_L",
+    "hemisphere": "L",
+    "lobe": "Frontal",
+    "function": "Gyrus rectus; emotional decision-making, reward valuation, social behavior",
+    "ad_relevance": "medium",
+    "notes": "Shows volume loss in AD; located in subgenual OFC; connected to limbic circuits; compensatory FC increases reported in early AD"
+  },
+  {
+    "index": 27,
+    "name": "Rectus_R",
+    "hemisphere": "R",
+    "lobe": "Frontal",
+    "function": "Gyrus rectus; emotional decision-making, reward valuation, social behavior",
+    "ad_relevance": "medium",
+    "notes": "Shows volume loss in AD; right hemisphere reward circuit; model shows high importance in MCI vs AD"
+  },
+  {
+    "index": 28,
+    "name": "Insula_L",
+    "hemisphere": "L",
+    "lobe": "Insula",
+    "function": "Insula; interoceptive awareness, emotional salience, pain processing, autonomic regulation",
+    "ad_relevance": "high",
+    "notes": "SN hub; anterior insula is critical for salience detection; FC disruption is early MCI marker; connected to ACC and amygdala; model shows NC>MCI in attention (SN=-0.32 in NC vs MCI)"
+  },
+  {
+    "index": 29,
+    "name": "Insula_R",
+    "hemisphere": "R",
+    "lobe": "Insula",
+    "function": "Insula; interoceptive awareness, emotional salience, pain processing",
+    "ad_relevance": "high",
+    "notes": "SN hub; right insula particularly important for body awareness and autonomic control; shows early FC changes in MCI"
+  },
+  {
+    "index": 30,
+    "name": "Cingulum_Ant_L",
+    "hemisphere": "L",
+    "lobe": "Cingulate",
+    "function": "Anterior cingulate cortex; conflict monitoring, error detection, emotional regulation, attention",
+    "ad_relevance": "high",
+    "notes": "SN node; neurofibrillary tangles appear in Braak Stage IV; key node for cognitive control; FC with insula disrupted in MCI"
+  },
+  {
+    "index": 31,
+    "name": "Cingulum_Ant_R",
+    "hemisphere": "R",
+    "lobe": "Cingulate",
+    "function": "Anterior cingulate cortex; conflict monitoring, pain affect",
+    "ad_relevance": "high",
+    "notes": "SN node; dorsal ACC for cognitive control; subgenual ACC for emotional processing"
+  },
+  {
+    "index": 32,
+    "name": "Cingulum_Mid_L",
+    "hemisphere": "L",
+    "lobe": "Cingulate",
+    "function": "Middle cingulate cortex; motor-limbic integration, pain processing, attention to action",
+    "ad_relevance": "medium",
+    "notes": "SN node; connects motor and limbic systems; cingulum bundle integrity (DTI) is AD biomarker"
+  },
+  {
+    "index": 33,
+    "name": "Cingulum_Mid_R",
+    "hemisphere": "R",
+    "lobe": "Cingulate",
+    "function": "Middle cingulate cortex; motor-limbic integration, skeletomotor body orientation",
+    "ad_relevance": "medium",
+    "notes": "SN node; cingulum bundle white matter tract connects hippocampus and PCC"
+  },
+  {
+    "index": 34,
+    "name": "Cingulum_Post_L",
+    "hemisphere": "L",
+    "lobe": "Cingulate",
+    "function": "Posterior cingulate cortex; default mode, self-referential processing, autobiographical memory, visuospatial orientation",
+    "ad_relevance": "high",
+    "notes": "DMN hub; CRITICAL: one of the earliest hypometabolism sites in preclinical AD (FDG-PET); Aβ accumulates here first; FC reduction with hippocampus is early MCI marker; model shows NC>AD attention (NC attention preserved here)"
+  },
+  {
+    "index": 35,
+    "name": "Cingulum_Post_R",
+    "hemisphere": "R",
+    "lobe": "Cingulate",
+    "function": "Posterior cingulate cortex; default mode, episodic memory retrieval, spatial navigation",
+    "ad_relevance": "high",
+    "notes": "DMN hub; PCC/precuneus complex is primary site of Aβ deposition in preclinical AD; retrograde memory"
+  },
+  {
+    "index": 36,
+    "name": "Hippocampus_L",
+    "hemisphere": "L",
+    "lobe": "Limbic",
+    "function": "Hippocampus; episodic memory encoding and consolidation, spatial navigation (cognitive map)",
+    "ad_relevance": "high",
+    "notes": "PRIMARY AD BIOMARKER: Braak Stage III-IV tau accumulation; left hippocampal volume loss is primary MRI diagnostic criterion; entorhinal-hippocampal FC disruption earliest FC change; LN model shows NC>>MCI in attention (LN=-0.33)"
+  },
+  {
+    "index": 37,
+    "name": "Hippocampus_R",
+    "hemisphere": "R",
+    "lobe": "Limbic",
+    "function": "Hippocampus; spatial memory, contextual fear conditioning, pattern separation",
+    "ad_relevance": "high",
+    "notes": "PRIMARY AD BIOMARKER: right hippocampal atrophy rate >3%/year in AD vs <1%/year in NC; bilateral hippocampal volume correlates with MMSE; model shows LN disruption in early MCI"
+  },
+  {
+    "index": 38,
+    "name": "ParaHippocampal_L",
+    "hemisphere": "L",
+    "lobe": "Limbic",
+    "function": "Parahippocampal gyrus; memory encoding support, scene recognition, spatial context",
+    "ad_relevance": "high",
+    "notes": "Contains entorhinal cortex (Braak Stage I-II); gateway to hippocampus; first site of NFT pathology; perirhinal cortex mediates semantic memory; early atrophy in MCI"
+  },
+  {
+    "index": 39,
+    "name": "ParaHippocampal_R",
+    "hemisphere": "R",
+    "lobe": "Limbic",
+    "function": "Parahippocampal gyrus; scene recognition, spatial navigation, allocentric memory",
+    "ad_relevance": "high",
+    "notes": "Contains entorhinal cortex; right PHC critical for spatial scene processing; topographical disorientation in early AD"
+  },
+  {
+    "index": 40,
+    "name": "Amygdala_L",
+    "hemisphere": "L",
+    "lobe": "Limbic",
+    "function": "Amygdala; emotional processing, fear conditioning, social emotion recognition",
+    "ad_relevance": "high",
+    "notes": "Early atrophy in AD along with hippocampus; connected to hippocampus via fornix; emotional memory consolidation; apathy and anxiety symptoms in MCI/AD linked to amygdala degeneration"
+  },
+  {
+    "index": 41,
+    "name": "Amygdala_R",
+    "hemisphere": "R",
+    "lobe": "Limbic",
+    "function": "Amygdala; threat detection, emotional arousal, social behavior",
+    "ad_relevance": "high",
+    "notes": "Right amygdala shows early tau pathology; volume loss correlates with neuropsychiatric symptoms in AD; model shows AD>MCI in LN attention"
+  },
+  {
+    "index": 42,
+    "name": "Calcarine_L",
+    "hemisphere": "L",
+    "lobe": "Occipital",
+    "function": "Calcarine sulcus / primary visual cortex (V1); basic visual processing, contrast detection",
+    "ad_relevance": "low",
+    "notes": "VN; generally preserved until late AD; affected in posterior cortical atrophy (PCA) variant; Aβ deposits late"
+  },
+  {
+    "index": 43,
+    "name": "Calcarine_R",
+    "hemisphere": "R",
+    "lobe": "Occipital",
+    "function": "Calcarine sulcus / primary visual cortex (V1); basic visual processing",
+    "ad_relevance": "low",
+    "notes": "VN; primary visual processing; preserved in typical AD"
+  },
+  {
+    "index": 44,
+    "name": "Cuneus_L",
+    "hemisphere": "L",
+    "lobe": "Occipital",
+    "function": "Cuneus; secondary visual cortex, visuospatial processing, visual attention",
+    "ad_relevance": "medium",
+    "notes": "VN; involved in PCA variant of AD; visuospatial deficits; model shows MCI has highest VN attention (compensatory hyperconnectivity)"
+  },
+  {
+    "index": 45,
+    "name": "Cuneus_R",
+    "hemisphere": "R",
+    "lobe": "Occipital",
+    "function": "Cuneus; visuospatial attention, depth perception",
+    "ad_relevance": "medium",
+    "notes": "VN; model shows Cuneus_R as top ROI in MCI vs AD differential"
+  },
+  {
+    "index": 46,
+    "name": "Lingual_L",
+    "hemisphere": "L",
+    "lobe": "Occipital",
+    "function": "Lingual gyrus; visual word form processing, color perception, dream imagery",
+    "ad_relevance": "medium",
+    "notes": "VN; visual reading circuit; connected to memory systems; shows FC changes in AD"
+  },
+  {
+    "index": 47,
+    "name": "Lingual_R",
+    "hemisphere": "R",
+    "lobe": "Occipital",
+    "function": "Lingual gyrus; face/scene processing, topographic memory",
+    "ad_relevance": "medium",
+    "notes": "VN; model shows Lingual_R as top NC-dominant ROI in NC vs AD (NC attention higher); important in DMN-visual coupling"
+  },
+  {
+    "index": 48,
+    "name": "Occipital_Sup_L",
+    "hemisphere": "L",
+    "lobe": "Occipital",
+    "function": "Superior occipital gyrus; higher visual processing, spatial attention, dorsal visual stream",
+    "ad_relevance": "medium",
+    "notes": "VN; dorsal stream for visuomotor coordination; involved in PCA variant"
+  },
+  {
+    "index": 49,
+    "name": "Occipital_Sup_R",
+    "hemisphere": "R",
+    "lobe": "Occipital",
+    "function": "Superior occipital gyrus; spatial perception, visual guidance of movement",
+    "ad_relevance": "medium",
+    "notes": "VN; right hemisphere spatial processing; FC changes with FPN in MCI"
+  },
+  {
+    "index": 50,
+    "name": "Occipital_Mid_L",
+    "hemisphere": "L",
+    "lobe": "Occipital",
+    "function": "Middle occipital gyrus; motion detection, object recognition, extrastriate cortex",
+    "ad_relevance": "medium",
+    "notes": "VN; V5/MT area for motion processing; shows FC hyperconnectivity in early MCI"
+  },
+  {
+    "index": 51,
+    "name": "Occipital_Mid_R",
+    "hemisphere": "R",
+    "lobe": "Occipital",
+    "function": "Middle occipital gyrus; motion detection, visual scene analysis",
+    "ad_relevance": "medium",
+    "notes": "VN; right occipital shows strong FC changes in NC vs MCI comparison"
+  },
+  {
+    "index": 52,
+    "name": "Occipital_Inf_L",
+    "hemisphere": "L",
+    "lobe": "Occipital",
+    "function": "Inferior occipital gyrus; ventral visual stream, object/face recognition",
+    "ad_relevance": "medium",
+    "notes": "VN; ventral stream entry to fusiform; model shows this as top differential ROI in NC vs AD"
+  },
+  {
+    "index": 53,
+    "name": "Occipital_Inf_R",
+    "hemisphere": "R",
+    "lobe": "Occipital",
+    "function": "Inferior occipital gyrus; ventral visual stream, face processing entry",
+    "ad_relevance": "medium",
+    "notes": "VN; top differential ROI in NC vs AD; right occipital shows consistent changes"
+  },
+  {
+    "index": 54,
+    "name": "Fusiform_L",
+    "hemisphere": "L",
+    "lobe": "Temporal",
+    "function": "Fusiform gyrus; face recognition (FFA), word recognition (VWFA), object category processing",
+    "ad_relevance": "high",
+    "notes": "Fusiform face area; atrophy correlates with face recognition deficits; semantic memory access; shows volume reduction in typical AD"
+  },
+  {
+    "index": 55,
+    "name": "Fusiform_R",
+    "hemisphere": "R",
+    "lobe": "Temporal",
+    "function": "Fusiform gyrus; face recognition, visual object expertise",
+    "ad_relevance": "high",
+    "notes": "Right fusiform predominant for holistic face processing; degree centrality reduction in AD"
+  },
+  {
+    "index": 56,
+    "name": "Postcentral_L",
+    "hemisphere": "L",
+    "lobe": "Parietal",
+    "function": "Postcentral gyrus / primary somatosensory cortex (S1); tactile and proprioceptive processing",
+    "ad_relevance": "low",
+    "notes": "SMN; primary sensory cortex; relatively preserved in typical AD"
+  },
+  {
+    "index": 57,
+    "name": "Postcentral_R",
+    "hemisphere": "R",
+    "lobe": "Parietal",
+    "function": "Postcentral gyrus / primary somatosensory cortex (S1); touch, pain, body position",
+    "ad_relevance": "low",
+    "notes": "SMN; sensory processing preserved until late AD"
+  },
+  {
+    "index": 58,
+    "name": "Parietal_Sup_L",
+    "hemisphere": "L",
+    "lobe": "Parietal",
+    "function": "Superior parietal lobule; visuomotor integration, spatial attention, tool use",
+    "ad_relevance": "high",
+    "notes": "FPN node; dorsal attention network; apraxia in AD linked to SPL; FC disruption with DLPFC in MCI"
+  },
+  {
+    "index": 59,
+    "name": "Parietal_Sup_R",
+    "hemisphere": "R",
+    "lobe": "Parietal",
+    "function": "Superior parietal lobule; spatial attention (right-dominant), attention shifting",
+    "ad_relevance": "high",
+    "notes": "FPN node; right SPL critical for visuospatial attention; hemineglect in advanced AD"
+  },
+  {
+    "index": 60,
+    "name": "Parietal_Inf_L",
+    "hemisphere": "L",
+    "lobe": "Parietal",
+    "function": "Inferior parietal lobule; language processing, spatial reasoning, semantic integration",
+    "ad_relevance": "high",
+    "notes": "FPN node; includes supramarginal and angular gyri area; language-dominant left IPL; significant atrophy in AD"
+  },
+  {
+    "index": 61,
+    "name": "Parietal_Inf_R",
+    "hemisphere": "R",
+    "lobe": "Parietal",
+    "function": "Inferior parietal lobule; spatial processing, gesture recognition, number cognition",
+    "ad_relevance": "high",
+    "notes": "FPN node; right IPL for visuospatial and spatial working memory; acalculia in AD"
+  },
+  {
+    "index": 62,
+    "name": "SupraMarginal_L",
+    "hemisphere": "L",
+    "lobe": "Parietal",
+    "function": "Supramarginal gyrus; phonological processing, working memory, empathy",
+    "ad_relevance": "medium",
+    "notes": "Part of phonological loop; language decoding; affected in logopenic AD variant"
+  },
+  {
+    "index": 63,
+    "name": "SupraMarginal_R",
+    "hemisphere": "R",
+    "lobe": "Parietal",
+    "function": "Supramarginal gyrus; emotional empathy, social cognition",
+    "ad_relevance": "medium",
+    "notes": "Right SMG for emotional prosody interpretation"
+  },
+  {
+    "index": 64,
+    "name": "Angular_L",
+    "hemisphere": "L",
+    "lobe": "Parietal",
+    "function": "Angular gyrus; semantic integration, reading comprehension, numerical cognition, attention",
+    "ad_relevance": "high",
+    "notes": "DMN node; multimodal semantic hub; left AG critical for reading and semantic memory retrieval; highly connected to PCC in DMN; FC reduction is key AD marker"
+  },
+  {
+    "index": 65,
+    "name": "Angular_R",
+    "hemisphere": "R",
+    "lobe": "Parietal",
+    "function": "Angular gyrus; spatial attention, semantic memory, self-referential thought",
+    "ad_relevance": "high",
+    "notes": "DMN node; right AG important for spatial reasoning; model shows Angular_R as top NC-dominant ROI in NC vs MCI"
+  },
+  {
+    "index": 66,
+    "name": "Precuneus_L",
+    "hemisphere": "L",
+    "lobe": "Parietal",
+    "function": "Precuneus; visuospatial imagery, episodic memory retrieval, self-consciousness, mental rotation",
+    "ad_relevance": "high",
+    "notes": "DMN hub; EARLIEST amyloid deposition site in preclinical AD; significant hypometabolism; FC disruption with PCC and hippocampus is most reliable early AD marker; model shows NC>AD in attention (Precuneus NC-dominant)"
+  },
+  {
+    "index": 67,
+    "name": "Precuneus_R",
+    "hemisphere": "R",
+    "lobe": "Parietal",
+    "function": "Precuneus; visuospatial processing, self-reflection, consciousness",
+    "ad_relevance": "high",
+    "notes": "DMN hub; right Precuneus shows Aβ accumulation in ADNI preclinical cohort; model shows Precuneus_R as AD-dominant ROI in MCI vs AD"
+  },
+  {
+    "index": 68,
+    "name": "Paracentral_Lob_L",
+    "hemisphere": "L",
+    "lobe": "Parietal",
+    "function": "Paracentral lobule; lower limb motor and sensory cortex, micturition control",
+    "ad_relevance": "low",
+    "notes": "SMN; motor and sensory representation of lower extremities; gait control"
+  },
+  {
+    "index": 69,
+    "name": "Paracentral_Lob_R",
+    "hemisphere": "R",
+    "lobe": "Parietal",
+    "function": "Paracentral lobule; lower limb motor and sensory cortex",
+    "ad_relevance": "low",
+    "notes": "SMN; gait and balance; falls risk in late AD"
+  },
+  {
+    "index": 70,
+    "name": "Caudate_L",
+    "hemisphere": "L",
+    "lobe": "Subcortical",
+    "function": "Caudate nucleus; procedural learning, executive function, reward-based learning",
+    "ad_relevance": "medium",
+    "notes": "BGN; connected to DLPFC via cortico-striatal loop; dopaminergic; FC with prefrontal shows changes in MCI"
+  },
+  {
+    "index": 71,
+    "name": "Caudate_R",
+    "hemisphere": "R",
+    "lobe": "Subcortical",
+    "function": "Caudate nucleus; spatial working memory, habit formation",
+    "ad_relevance": "medium",
+    "notes": "BGN; right caudate for spatial learning; volume reduced in late AD"
+  },
+  {
+    "index": 72,
+    "name": "Putamen_L",
+    "hemisphere": "L",
+    "lobe": "Subcortical",
+    "function": "Putamen; motor sequence learning, procedural memory, reward processing",
+    "ad_relevance": "low",
+    "notes": "BGN; dopaminergic; motor circuit hub; relatively preserved in early AD; involved in Lewy body dementia differential"
+  },
+  {
+    "index": 73,
+    "name": "Putamen_R",
+    "hemisphere": "R",
+    "lobe": "Subcortical",
+    "function": "Putamen; motor learning, habitual behavior",
+    "ad_relevance": "low",
+    "notes": "BGN; dopamine release for reward; model shows Putamen_R as AD-important in MCI vs AD"
+  },
+  {
+    "index": 74,
+    "name": "Pallidum_L",
+    "hemisphere": "L",
+    "lobe": "Subcortical",
+    "function": "Globus pallidus; motor control modulation, basal ganglia output",
+    "ad_relevance": "low",
+    "notes": "BGN; relay station for motor control; inhibitory GABAergic output to thalamus"
+  },
+  {
+    "index": 75,
+    "name": "Pallidum_R",
+    "hemisphere": "R",
+    "lobe": "Subcortical",
+    "function": "Globus pallidus; motor control, movement suppression",
+    "ad_relevance": "low",
+    "notes": "BGN; motor control circuit; affected in extrapyramidal symptoms"
+  },
+  {
+    "index": 76,
+    "name": "Thalamus_L",
+    "hemisphere": "L",
+    "lobe": "Subcortical",
+    "function": "Thalamus; sensory relay, consciousness regulation, corticothalamic gating",
+    "ad_relevance": "medium",
+    "notes": "BGN; thalamic atrophy correlates with global cognitive decline; mediodorsal nucleus connects to prefrontal; pulvinar connects to posterior cortex; FC disruption widespread in AD"
+  },
+  {
+    "index": 77,
+    "name": "Thalamus_R",
+    "hemisphere": "R",
+    "lobe": "Subcortical",
+    "function": "Thalamus; sensory integration, sleep regulation, attention gating",
+    "ad_relevance": "medium",
+    "notes": "BGN; right thalamus for spatial attention; sleep dysregulation in MCI/AD linked to thalamic changes"
+  },
+  {
+    "index": 78,
+    "name": "Heschl_L",
+    "hemisphere": "L",
+    "lobe": "Temporal",
+    "function": "Heschl's gyrus / primary auditory cortex (A1); basic auditory processing, pitch detection",
+    "ad_relevance": "low",
+    "notes": "Primary auditory; preserved in typical AD; affected in some dementia variants"
+  },
+  {
+    "index": 79,
+    "name": "Heschl_R",
+    "hemisphere": "R",
+    "lobe": "Temporal",
+    "function": "Heschl's gyrus / primary auditory cortex; music perception, tonal processing",
+    "ad_relevance": "low",
+    "notes": "Primary auditory; right dominant for music and prosody"
+  },
+  {
+    "index": 80,
+    "name": "Temporal_Sup_L",
+    "hemisphere": "L",
+    "lobe": "Temporal",
+    "function": "Superior temporal gyrus; auditory association, speech comprehension (Wernicke's area)",
+    "ad_relevance": "high",
+    "notes": "Wernicke's area; language comprehension; atrophy in typical and logopenic variant AD; STS for biological motion"
+  },
+  {
+    "index": 81,
+    "name": "Temporal_Sup_R",
+    "hemisphere": "R",
+    "lobe": "Temporal",
+    "function": "Superior temporal gyrus; prosody, social cognition, biological motion",
+    "ad_relevance": "high",
+    "notes": "Right STG for social cognition and theory of mind; atrophy correlates with social symptoms in AD"
+  },
+  {
+    "index": 82,
+    "name": "Temporal_Pole_Sup_L",
+    "hemisphere": "L",
+    "lobe": "Temporal",
+    "function": "Temporal pole superior; semantic memory, conceptual knowledge, social emotion",
+    "ad_relevance": "high",
+    "notes": "Semantic memory hub; early atrophy in semantic dementia and temporal variant AD; connected to amygdala and OFC"
+  },
+  {
+    "index": 83,
+    "name": "Temporal_Pole_Sup_R",
+    "hemisphere": "R",
+    "lobe": "Temporal",
+    "function": "Temporal pole superior; social cognition, autobiographical memory, emotional semantics",
+    "ad_relevance": "high",
+    "notes": "Right temporal pole for person-specific semantic knowledge and social memory"
+  },
+  {
+    "index": 84,
+    "name": "Temporal_Mid_L",
+    "hemisphere": "L",
+    "lobe": "Temporal",
+    "function": "Middle temporal gyrus; semantic memory, language comprehension, tool knowledge",
+    "ad_relevance": "high",
+    "notes": "Core semantic memory region; significant atrophy in typical AD; FC changes with frontal semantic regions; model shows Temporal_Mid as top AD differential ROI"
+  },
+  {
+    "index": 85,
+    "name": "Temporal_Mid_R",
+    "hemisphere": "R",
+    "lobe": "Temporal",
+    "function": "Middle temporal gyrus; semantic memory, narrative comprehension, biological motion",
+    "ad_relevance": "high",
+    "notes": "Temporal_Mid_R is top AD-discriminative ROI in NC vs AD; semantic processing disruption; widely reported in AD neuroimaging"
+  },
+  {
+    "index": 86,
+    "name": "Temporal_Pole_Mid_L",
+    "hemisphere": "L",
+    "lobe": "Temporal",
+    "function": "Temporal pole middle; conceptual knowledge, cross-modal semantic binding",
+    "ad_relevance": "high",
+    "notes": "Semantic hub; early atrophy in semantic dementia; connects visual and verbal semantic systems"
+  },
+  {
+    "index": 87,
+    "name": "Temporal_Pole_Mid_R",
+    "hemisphere": "R",
+    "lobe": "Temporal",
+    "function": "Temporal pole middle; social semantic memory, face-name associations",
+    "ad_relevance": "high",
+    "notes": "Face-name binding; famous person recognition deficits in AD"
+  },
+  {
+    "index": 88,
+    "name": "Temporal_Inf_L",
+    "hemisphere": "L",
+    "lobe": "Temporal",
+    "function": "Inferior temporal gyrus; ventral visual stream, object recognition, semantic categorization",
+    "ad_relevance": "high",
+    "notes": "Category-selective object recognition; visual semantic processing; atrophy in typical AD"
+  },
+  {
+    "index": 89,
+    "name": "Temporal_Inf_R",
+    "hemisphere": "R",
+    "lobe": "Temporal",
+    "function": "Inferior temporal gyrus; face and object recognition, visual expertise",
+    "ad_relevance": "high",
+    "notes": "Right IT for visual object categorization; connected to fusiform face area"
+  },
+  {
+    "index": 90,
+    "name": "Cerebelum_Crus1_L",
+    "hemisphere": "L",
+    "lobe": "Cerebellum",
+    "function": "Cerebellar Crus I; cognitive processing, language, connected to prefrontal via dentato-thalamo-cortical tract",
+    "ad_relevance": "medium",
+    "notes": "CereN; cognitive cerebellum; FC with DMN and FPN; FC changes observed in AD"
+  },
+  {
+    "index": 91,
+    "name": "Cerebelum_Crus1_R",
+    "hemisphere": "R",
+    "lobe": "Cerebellum",
+    "function": "Cerebellar Crus I; cognitive processing, executive function support",
+    "ad_relevance": "medium",
+    "notes": "CereN; connected to contralateral prefrontal; cognitive cerebellar circuit"
+  },
+  {
+    "index": 92,
+    "name": "Cerebelum_Crus2_L",
+    "hemisphere": "L",
+    "lobe": "Cerebellum",
+    "function": "Cerebellar Crus II; cognitive and social processing, DMN-cerebellar connectivity",
+    "ad_relevance": "medium",
+    "notes": "CereN; Crus I/II form cognitive cerebellum; show FC with DMN regions; changes in AD"
+  },
+  {
+    "index": 93,
+    "name": "Cerebelum_Crus2_R",
+    "hemisphere": "R",
+    "lobe": "Cerebellum",
+    "function": "Cerebellar Crus II; higher cognitive function support",
+    "ad_relevance": "medium",
+    "notes": "CereN; right cerebellar Crus II connected to left prefrontal (crossed laterality)"
+  },
+  {
+    "index": 94,
+    "name": "Cerebelum_3_L",
+    "hemisphere": "L",
+    "lobe": "Cerebellum",
+    "function": "Cerebellar lobule III; sensorimotor coordination",
+    "ad_relevance": "low",
+    "notes": "CereN; motor cerebellum; balance and gait"
+  },
+  {
+    "index": 95,
+    "name": "Cerebelum_3_R",
+    "hemisphere": "R",
+    "lobe": "Cerebellum",
+    "function": "Cerebellar lobule III; sensorimotor coordination",
+    "ad_relevance": "low",
+    "notes": "CereN; motor coordination"
+  },
+  {
+    "index": 96,
+    "name": "Cerebelum_4_5_L",
+    "hemisphere": "L",
+    "lobe": "Cerebellum",
+    "function": "Cerebellar lobules IV-V; motor control, limb coordination",
+    "ad_relevance": "low",
+    "notes": "CereN; anterior cerebellar lobe; motor execution"
+  },
+  {
+    "index": 97,
+    "name": "Cerebelum_4_5_R",
+    "hemisphere": "R",
+    "lobe": "Cerebellum",
+    "function": "Cerebellar lobules IV-V; limb motor coordination",
+    "ad_relevance": "low",
+    "notes": "CereN; motor cerebellar lobule"
+  },
+  {
+    "index": 98,
+    "name": "Cerebelum_6_L",
+    "hemisphere": "L",
+    "lobe": "Cerebellum",
+    "function": "Cerebellar lobule VI; sensorimotor and cognitive processing transition zone",
+    "ad_relevance": "low",
+    "notes": "CereN; lobule VI is interface between motor and cognitive cerebellum"
+  },
+  {
+    "index": 99,
+    "name": "Cerebelum_6_R",
+    "hemisphere": "R",
+    "lobe": "Cerebellum",
+    "function": "Cerebellar lobule VI; sensorimotor integration",
+    "ad_relevance": "low",
+    "notes": "CereN; sensorimotor integration"
+  },
+  {
+    "index": 100,
+    "name": "Cerebelum_7b_L",
+    "hemisphere": "L",
+    "lobe": "Cerebellum",
+    "function": "Cerebellar lobule VIIb; multisensory integration",
+    "ad_relevance": "low",
+    "notes": "CereN; posterior cerebellar lobe"
+  },
+  {
+    "index": 101,
+    "name": "Cerebelum_7b_R",
+    "hemisphere": "R",
+    "lobe": "Cerebellum",
+    "function": "Cerebellar lobule VIIb; multisensory integration",
+    "ad_relevance": "low",
+    "notes": "CereN; posterior cerebellar lobe"
+  },
+  {
+    "index": 102,
+    "name": "Cerebelum_8_L",
+    "hemisphere": "L",
+    "lobe": "Cerebellum",
+    "function": "Cerebellar lobule VIII; sensorimotor processing, balance",
+    "ad_relevance": "low",
+    "notes": "CereN; connected to vestibular nuclei"
+  },
+  {
+    "index": 103,
+    "name": "Cerebelum_8_R",
+    "hemisphere": "R",
+    "lobe": "Cerebellum",
+    "function": "Cerebellar lobule VIII; balance, locomotion",
+    "ad_relevance": "low",
+    "notes": "CereN; fall risk in AD relates to cerebellar dysfunction"
+  },
+  {
+    "index": 104,
+    "name": "Cerebelum_9_L",
+    "hemisphere": "L",
+    "lobe": "Cerebellum",
+    "function": "Cerebellar lobule IX; vestibular processing, oculomotor control",
+    "ad_relevance": "low",
+    "notes": "CereN; eye movement coordination"
+  },
+  {
+    "index": 105,
+    "name": "Cerebelum_9_R",
+    "hemisphere": "R",
+    "lobe": "Cerebellum",
+    "function": "Cerebellar lobule IX; vestibular and autonomic processing",
+    "ad_relevance": "low",
+    "notes": "CereN; cerebellar-limbic connection"
+  },
+  {
+    "index": 106,
+    "name": "Cerebelum_10_L",
+    "hemisphere": "L",
+    "lobe": "Cerebellum",
+    "function": "Cerebellar lobule X (flocculus); vestibular processing, balance reflex",
+    "ad_relevance": "medium",
+    "notes": "CereN; model shows Cerebellum_10 as top blue ROI in MCI vs AD (MCI has higher attention)"
+  },
+  {
+    "index": 107,
+    "name": "Cerebelum_10_R",
+    "hemisphere": "R",
+    "lobe": "Cerebellum",
+    "function": "Cerebellar lobule X (flocculus); vestibular processing, gaze stabilization",
+    "ad_relevance": "medium",
+    "notes": "CereN; oculomotor and balance control"
+  },
+  {
+    "index": 108,
+    "name": "Vermis_1_2",
+    "hemisphere": "M",
+    "lobe": "Cerebellum",
+    "function": "Cerebellar vermis lobules I-II; motor coordination midline",
+    "ad_relevance": "low",
+    "notes": "CereN; vermis for axial motor control"
+  },
+  {
+    "index": 109,
+    "name": "Vermis_3",
+    "hemisphere": "M",
+    "lobe": "Cerebellum",
+    "function": "Cerebellar vermis lobule III; balance coordination",
+    "ad_relevance": "low",
+    "notes": "CereN; midline cerebellar"
+  },
+  {
+    "index": 110,
+    "name": "Vermis_4_5",
+    "hemisphere": "M",
+    "lobe": "Cerebellum",
+    "function": "Cerebellar vermis lobules IV-V; trunk motor control",
+    "ad_relevance": "low",
+    "notes": "CereN; truncal ataxia"
+  },
+  {
+    "index": 111,
+    "name": "Vermis_6",
+    "hemisphere": "M",
+    "lobe": "Cerebellum",
+    "function": "Cerebellar vermis lobule VI; oculomotor and cognitive integration",
+    "ad_relevance": "low",
+    "notes": "CereN; vermis VI connected to visual cortex"
+  },
+  {
+    "index": 112,
+    "name": "Vermis_7",
+    "hemisphere": "M",
+    "lobe": "Cerebellum",
+    "function": "Cerebellar vermis lobule VII; cognitive cerebellar vermis",
+    "ad_relevance": "low",
+    "notes": "CereN"
+  },
+  {
+    "index": 113,
+    "name": "Vermis_8",
+    "hemisphere": "M",
+    "lobe": "Cerebellum",
+    "function": "Cerebellar vermis lobule VIII; sensorimotor vermis",
+    "ad_relevance": "low",
+    "notes": "CereN"
+  },
+  {
+    "index": 114,
+    "name": "Vermis_9",
+    "hemisphere": "M",
+    "lobe": "Cerebellum",
+    "function": "Cerebellar vermis lobule IX; vestibular vermis",
+    "ad_relevance": "low",
+    "notes": "CereN"
+  },
+  {
+    "index": 115,
+    "name": "Vermis_10",
+    "hemisphere": "M",
+    "lobe": "Cerebellum",
+    "function": "Cerebellar vermis lobule X; vestibulocerebellar, equilibrium",
+    "ad_relevance": "low",
+    "notes": "CereN"
+  }
+]

@@ -1,0 +1,38 @@
+{
+  "NC": {
+    "fullname": "Normal Control",
+    "criteria": "MMSE >= 27, CDR = 0, no subjective cognitive complaints, no neurological diagnosis",
+    "biomarkers": [
+      "Normal hippocampal volume",
+      "Aβ42 CSF > 192 pg/mL",
+      "p-tau < 23 pg/mL",
+      "FDG-PET normal"
+    ],
+    "fc_characteristics": "Intact DMN FC; strong PCC-hippocampus coupling; balanced SN-DMN switching; preserved FPN-DMN anticorrelation"
+  },
+  "MCI": {
+    "fullname": "Mild Cognitive Impairment",
+    "criteria": "MMSE 24-27, CDR = 0.5, subjective and objective memory complaints, preserved daily function, NIA-AA amnestic MCI",
+    "biomarkers": [
+      "Hippocampal atrophy (>3%/year)",
+      "Aβ42 CSF borderline 150-192 pg/mL",
+      "p-tau 23-35 pg/mL",
+      "Subtle FDG-PET hypometabolism in PCC"
+    ],
+    "fc_characteristics": "Reduced PCC-hippocampus FC; VN compensatory hyperconnectivity; SN disruption; LN (limbic) FC most disrupted; conversion rate ~15%/year to AD",
+    "subtypes": "sMCI (stable, ADNI-3 predominant) vs pMCI (progressive); sMCI shows NC-like structural features"
+  },
+  "AD": {
+    "fullname": "Alzheimer's Disease",
+    "criteria": "MMSE < 24, CDR >= 1, NIA-AA probable AD, significant ADL impairment",
+    "biomarkers": [
+      "Severe hippocampal atrophy",
+      "Aβ42 CSF < 150 pg/mL",
+      "p-tau > 35 pg/mL",
+      "FDG-PET hypometabolism in PCC/temporal/parietal",
+      "Positive amyloid PET"
+    ],
+    "fc_characteristics": "Severe DMN fragmentation; VN FC collapse; LN complete disruption; olfactory and temporal FC severely reduced; global network efficiency decreased",
+    "braak_stages": "NFT: Stage I-II (entorhinal/olfactory) → Stage III-IV (hippocampus/amygdala) → Stage V-VI (neocortex)"
+  }
+}

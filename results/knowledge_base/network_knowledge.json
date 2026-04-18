@@ -1,0 +1,203 @@
+{
+  "DMN": {
+    "fullname": "Default Mode Network",
+    "roi_indices": [
+      34,
+      35,
+      66,
+      67,
+      64,
+      65,
+      22,
+      23,
+      24,
+      25
+    ],
+    "function": "Self-referential processing, autobiographical memory, mind-wandering, social cognition, future thinking",
+    "ad_description": "Most consistently disrupted network in AD; Aβ preferentially accumulates in DMN hubs (PCC, precuneus, mPFC); FC within DMN is primary imaging biomarker",
+    "progression": "PCC-hippocampus FC reduction earliest; spreads to angular gyrus and mPFC in MCI; global DMN collapse in AD",
+    "attn_diff": {
+      "NC_vs_AD": -0.07,
+      "NC_vs_MCI": 0.04,
+      "MCI_vs_AD": -0.13
+    }
+  },
+  "SMN": {
+    "fullname": "Sensorimotor Network",
+    "roi_indices": [
+      0,
+      1,
+      56,
+      57,
+      68,
+      69
+    ],
+    "function": "Primary motor and somatosensory processing, motor planning, body representation",
+    "ad_description": "Relatively preserved in early AD; affected in late-stage with motor symptoms; NC has higher SMN attention than disease stages",
+    "progression": "Preserved in MCI; subtle changes in moderate AD; motor symptoms in late AD",
+    "attn_diff": {
+      "NC_vs_AD": -0.26,
+      "NC_vs_MCI": -0.16,
+      "MCI_vs_AD": -0.13
+    }
+  },
+  "VN": {
+    "fullname": "Visual Network",
+    "roi_indices": [
+      42,
+      43,
+      44,
+      45,
+      46,
+      47,
+      48,
+      49,
+      50,
+      51,
+      52,
+      53
+    ],
+    "function": "Primary and higher-order visual processing, visuospatial cognition, object/scene recognition",
+    "ad_description": "Shows U-shaped attention pattern: MCI has highest VN attention (compensatory hyperconnectivity), which collapses in AD; PCA variant shows early VN disruption",
+    "progression": "MCI: compensatory hyperconnectivity (VN attention highest); AD: FC collapse; PCA variant: primary VN disruption",
+    "attn_diff": {
+      "NC_vs_AD": -0.11,
+      "NC_vs_MCI": 0.26,
+      "MCI_vs_AD": -0.41
+    }
+  },
+  "SN": {
+    "fullname": "Salience Network",
+    "roi_indices": [
+      28,
+      29,
+      30,
+      31,
+      32,
+      33
+    ],
+    "function": "Salience detection, interoception, switching between DMN and FPN, emotional processing, autonomic regulation",
+    "ad_description": "Disrupted early in MCI; NC has significantly higher SN attention than MCI (SN=-0.32 in NC vs MCI); insula and ACC show early tau accumulation",
+    "progression": "MCI: insula FC disruption earliest SN change; modulates DMN-FPN switching impaired; AD: severe SN degradation",
+    "attn_diff": {
+      "NC_vs_AD": -0.18,
+      "NC_vs_MCI": -0.32,
+      "MCI_vs_AD": 0.12
+    }
+  },
+  "FPN": {
+    "fullname": "Frontoparietal Network",
+    "roi_indices": [
+      6,
+      7,
+      58,
+      59,
+      60,
+      61
+    ],
+    "function": "Goal-directed cognition, cognitive control, working memory, top-down attention, flexible task performance",
+    "ad_description": "DLPFC-SPL circuit disrupted in MCI; executive function decline correlates with FPN FC reduction; FPN moderates DMN activity",
+    "progression": "Subtle FC reduction in MCI between DLPFC and parietal; progressive working memory and executive dysfunction",
+    "attn_diff": {
+      "NC_vs_AD": -0.13,
+      "NC_vs_MCI": 0.02,
+      "MCI_vs_AD": -0.16
+    }
+  },
+  "LN": {
+    "fullname": "Limbic Network",
+    "roi_indices": [
+      36,
+      37,
+      38,
+      39,
+      40,
+      41
+    ],
+    "function": "Episodic memory encoding/retrieval, emotional processing, fear conditioning, spatial navigation",
+    "ad_description": "Hippocampus-entorhinal circuit is primary AD pathology site (Braak Stage I-IV); LN attention is LOWEST in MCI (NC>>MCI), then rises in AD as damage becomes discriminative feature",
+    "progression": "Preclinical: entorhinal cortex tau; MCI: hippocampal FC most disrupted (lowest LN attention); AD: widespread limbic damage",
+    "attn_diff": {
+      "NC_vs_AD": -0.1,
+      "NC_vs_MCI": -0.33,
+      "MCI_vs_AD": 0.24
+    }
+  },
+  "VAN": {
+    "fullname": "Ventral Attention Network",
+    "roi_indices": [
+      10,
+      11,
+      14,
+      15
+    ],
+    "function": "Stimulus-driven attention reorienting, task-irrelevant salient detection, language-attention integration",
+    "ad_description": "Disrupted in MCI affecting attention reorienting; shows positive attention difference in AD (AD>NC); VAN disruption linked to attentional lapses",
+    "progression": "MCI: attention reorienting impaired; AD: further VAN dysregulation",
+    "attn_diff": {
+      "NC_vs_AD": 0.1,
+      "NC_vs_MCI": -0.08,
+      "MCI_vs_AD": 0.19
+    }
+  },
+  "BGN": {
+    "fullname": "Basal Ganglia Network",
+    "roi_indices": [
+      70,
+      71,
+      72,
+      73,
+      74,
+      75,
+      76,
+      77
+    ],
+    "function": "Procedural learning, reward processing, motor sequence control, executive function via cortico-striatal loops",
+    "ad_description": "Cortico-striatal FC changes in MCI; thalamo-cortical network involved in consciousness and gating; dopaminergic system relatively preserved in typical AD vs Lewy body",
+    "progression": "Caudate-DLPFC FC reduction in MCI; thalamic connectivity changes; pallidal involvement in late AD",
+    "attn_diff": {
+      "NC_vs_AD": 0.03,
+      "NC_vs_MCI": -0.13,
+      "MCI_vs_AD": 0.15
+    }
+  },
+  "CereN": {
+    "fullname": "Cerebellar Network",
+    "roi_indices": [
+      90,
+      91,
+      92,
+      93,
+      94,
+      95,
+      96,
+      97,
+      98,
+      99,
+      100,
+      101,
+      102,
+      103,
+      104,
+      105,
+      106,
+      107,
+      108,
+      109,
+      110,
+      111,
+      112,
+      113,
+      114,
+      115
+    ],
+    "function": "Motor coordination, cognitive processing (Crus I/II), balance, vestibular integration, timing",
+    "ad_description": "Cognitive cerebellum (Crus I/II) FC changes with DMN and FPN in AD; motor cerebellum shows late-stage changes; gait and balance impairment in advanced AD",
+    "progression": "Crus I/II show FC changes with prefrontal early; motor cerebellum affected in late-stage falls risk",
+    "attn_diff": {
+      "NC_vs_AD": 0.11,
+      "NC_vs_MCI": 0.15,
+      "MCI_vs_AD": -0.03
+    }
+  }
+}
