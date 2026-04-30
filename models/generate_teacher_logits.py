@@ -14,18 +14,26 @@ import torch.nn as nn
 DATA_DIR_TPMIC = "/home/wei-chi/Model/sMRI_data_MultiModal_Aligned_MNI"
 DATA_DIR_ADNI  = "/home/wei-chi/Data/ADNI_sMRI_Aligned_MNI"
 MODEL_SAVE_DIR = "/home/wei-chi/Data/script/resnet_checkpoints"
+# 產出的檔案要放的地方 (GNN 訓練時會去這裡讀 teacher logits)
+OUTPUT_DIR     = "/home/wei-chi/Data/script/checkpoints/resnet_checkpoints"
 
 # ==========================================
-# 2. 萬用 ID 萃取器 (精確拔除各種前後綴)
+# 2. 萬用 ID 萃取器 (拔除前後綴)
 # ==========================================
 def get_clean_id(path):
     basename = os.path.basename(str(path))
+    # 對 ADNI ID 的特別處理: 例如 003_S_6833
+    adni_match = re.search(r'(\d{3}_S_\d{4})', basename)
+    if adni_match:
+        return adni_match.group(1)
+    
+    # 處理 TPMIC ID: 例如 0076
     clean = re.sub(r'(_matrix_116\.npy|_matrix_clean_116\.npy|_task-rest_bold_matrix_clean_116\.npy|_T1_MNI\.nii\.gz|_T1\.nii\.gz|\.nii\.gz)$', '', basename)
     clean = re.sub(r'^(sub-|sub_|old_dswau)', '', clean)
-    return clean
+    return clean.strip()
 
 # ==========================================
-# 3. 確保與訓練時相同的 ROI 裁切邏輯
+# 3. 預處理
 # ==========================================
 def get_transforms(use_roi=False):
     roi_crop = []
@@ -78,38 +86,46 @@ def build_model(device):
     return model.to(device)
 
 # ==========================================
-# 5. 執行推理與打包
+# 5. 執行推理並儲存
 # ==========================================
 def main():
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    print(f"🚀 啟動老師標籤重建引擎 ({device})")
+    print(f"🚀 啟動 Teacher Logits 生成器 (支援 TPMIC + ADNI)")
     
     tasks = [('NC', 'AD'), ('NC', 'MCI'), ('MCI', 'AD')]
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
     
     for task_pair in tasks:
         class_a, class_b = task_pair
         task_name = f"{class_a}_vs_{class_b}"
-        print(f"\n[{task_name}] 正在處理...")
+        print(f"\n[{task_name}] 正在掃描影像...")
         
-        # MCI 任務必須開啟 ROI 以匹配訓練時的模型
         use_roi = bool({"MCI", "sMCI", "pMCI"} & set(task_pair))
         val_transforms = get_transforms(use_roi=use_roi)
         
-        # 收集影像路徑
+        # 收集路徑
         data_dicts = []
         for label, class_name in enumerate([class_a, class_b]):
+            # 搜尋 TPMIC 與 ADNI
             for d_dir in [DATA_DIR_TPMIC, DATA_DIR_ADNI]:
                 folder = os.path.join(d_dir, class_name)
                 if os.path.exists(folder):
-                    for fp in glob.glob(os.path.join(folder, "**", "*[Tt]1*.nii.gz"), recursive=True):
-                        data_dicts.append({"image": fp, "label": label, "orig_path": fp})
+                    # 搜尋符合 T1 命名的所有影像
+                    files = glob.glob(os.path.join(folder, "**", "*.nii.gz"), recursive=True)
+                    for fp in files:
+                        # 簡單過濾一下，確保是結構像而非 FC 或其他中間產物
+                        if "T1" in os.path.basename(fp) or "sub-" in os.path.basename(fp):
+                            data_dicts.append({"image": fp, "label": label, "orig_path": fp})
         
         if not data_dicts:
+            print(f"  ⚠️ 找不到任何影像，跳過任務。")
             continue
+            
+        print(f"  🔍 發現 {len(data_dicts)} 筆候選影像，準備推理...")
             
         model_path = os.path.join(MODEL_SAVE_DIR, f'smri_resnet_v3_{task_name}_best.pth')
         if not os.path.exists(model_path):
-            print(f"  ❌ 找不到模型: {model_path}")
+            print(f"  ❌ 找不到對應的 ResNet 模型權重: {model_path}")
             continue
             
         model = build_model(device)
@@ -118,21 +134,23 @@ def main():
         model.eval()
         
         ds = Dataset(data=data_dicts, transform=val_transforms)
-        loader = DataLoader(ds, batch_size=1, num_workers=2)
+        loader = DataLoader(ds, batch_size=1, num_workers=4)
         
         teacher_dict = {}
         with torch.no_grad():
             for i, batch_data in enumerate(loader):
                 inp = batch_data["image"].to(device)
-                prob = torch.softmax(model(inp), dim=1).cpu().numpy()[0]
+                # 獲取機率
+                logits = model(inp)
+                prob = torch.softmax(logits, dim=1).cpu().numpy()[0]
                 
-                # 手動繞過 MONAI，直接從原始清單拿路徑並萃取 ID
                 subj_id = get_clean_id(data_dicts[i]["orig_path"])
                 teacher_dict[subj_id] = prob
                 
-        out_npy = os.path.join(MODEL_SAVE_DIR, f"teacher_logits_{task_name}.npy")
+        # 存成小寫檔名以對應 GNN 訓練腳本
+        out_npy = os.path.join(OUTPUT_DIR, f"teacher_logits_{task_name.lower()}.npy")
         np.save(out_npy, teacher_dict, allow_pickle=True)
-        print(f"  ✅ 成功產出 {len(teacher_dict)} 筆清晰 ID 對齊標籤 -> {out_npy}")
+        print(f"  ✅ 成功！產出 {len(teacher_dict)} 筆標籤 -> {out_npy}")
 
 if __name__ == "__main__":
     main()

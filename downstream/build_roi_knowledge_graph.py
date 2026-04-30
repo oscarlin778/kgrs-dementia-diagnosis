@@ -15,7 +15,7 @@ import json
 import os
 
 # ── Neo4j 連線設定（依環境修改）──────────────────────────────────
-NEO4J_URI      = os.getenv("NEO4J_URI",      "neo4j://192.168.51.183:7687")
+NEO4J_URI      = os.getenv("NEO4J_URI",      "neo4j://localhost:7687")
 NEO4J_USER     = os.getenv("NEO4J_USER",     "neo4j")
 NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD")
 

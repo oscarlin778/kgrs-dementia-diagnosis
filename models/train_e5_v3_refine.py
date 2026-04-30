@@ -19,7 +19,7 @@ sys.path.insert(0, '/home/wei-chi/Data/script')
 import save_experiment_results as ser
 
 # ===============================================================
-# Settings & Hyperparameters
+# Settings & Hyperparameters (same as E3 base)
 # ===============================================================
 CSV_PATHS = [
     "/home/wei-chi/Model/_dataset_mapping.csv",
@@ -30,7 +30,7 @@ MATRIX_DIR = "/home/wei-chi/Model/processed_116_matrices"
 TEACHER_PROBS_DIR = "/home/wei-chi/Data/script/checkpoints/resnet_checkpoints"
 
 HIDDEN_DIM      = 128
-DROPOUT         = 0.4    # 降回 0.4，給模型多一點學習空間
+DROPOUT         = 0.4
 LR              = 3e-4
 WEIGHT_DECAY    = 5e-3
 EPOCHS          = 200
@@ -40,17 +40,25 @@ SEED            = 42
 K_RATIO         = 0.20
 PATIENCE        = 40
 
-# 🌟 V8 核心修改：使用溫和的 MSE 蒸餾，提高 KD 容錯率
-LAMBDA_CE       = 1.0    # 醫生真實標籤
-LAMBDA_KD       = 0.5    # 老師軟標籤 (MSE 值較小，因此放大倍率)
-LAMBDA_CONTRA   = 0.0    # 關掉對比學習：原版公式梯度為零，修正後溫度太低反而不穩定
-CONTRA_TEMP     = 0.5    # 若未來要開啟，溫度要夠高才穩定
+LAMBDA_CE       = 1.0
+LAMBDA_KD       = 0.5
+LAMBDA_CONTRA   = 0.0
+CONTRA_TEMP     = 0.5
 
-# 🌟 V10 Multi-run Ensemble（用不同 seed 跑多次，平均 OOF 預測降低 variance）
-SEEDS = [42, 123, 456]   # 3 個 seed，各跑一次完整 5-fold，最後平均 OOF probs
+SEEDS = [42, 123, 456]
+
+# ── E5: hybrid per-task domain adversarial weight ───────────────
+# NC_vs_MCI: revert to 0.3 (λ=0.5 in E4 over-aligned, E3=0.3 was better)
+# MCI_vs_AD: keep 0.1 from E4 (+0.011 AUC confirmed)
+# NC_vs_AD: unchanged at 0.3
+LAMBDA_DOMAIN_PER_TASK = {
+    ('NC', 'AD'):  0.3,
+    ('NC', 'MCI'): 0.3,
+    ('MCI', 'AD'): 0.1,
+}
 
 # ===============================================================
-# 1. 網路圖譜與特徵萃取 
+# 1. Network map & node features
 # ===============================================================
 NETWORK_MAP = {
     'DMN':   [34, 35, 66, 67, 64, 65, 22, 23, 24, 25],
@@ -75,7 +83,6 @@ def extract_node_features(adj_z: np.ndarray) -> np.ndarray:
     net_list = list(NETWORK_MAP.keys())
     roi_to_net = {roi: i for i, net in enumerate(net_list) for roi in NETWORK_MAP[net]}
 
-    # ── 拓撲特徵預計算（使用與 Dataset 相同的 top-k 稀疏圖）──
     adj_abs = np.abs(adj_z.copy())
     np.fill_diagonal(adj_abs, 0)
     k = int(N * K_RATIO)
@@ -83,14 +90,12 @@ def extract_node_features(adj_z: np.ndarray) -> np.ndarray:
     for i in range(N):
         top_idx = np.argsort(adj_abs[i])[-k:]
         adj_bin[i, top_idx] = 1.0
-    adj_bin = np.maximum(adj_bin, adj_bin.T)  # symmetric
+    adj_bin = np.maximum(adj_bin, adj_bin.T)
 
-    # Clustering coefficient（weighted, Onnela 2005 近似）
     degree = adj_bin.sum(axis=1)
     cc = np.diag(adj_bin @ adj_bin @ adj_bin) / (degree * (degree - 1) + 1e-8)
     cc = cc.astype(np.float32)
 
-    # Participation coefficient（跨網路整合度）
     adj_abs_thresh = adj_abs * adj_bin
     pc = np.zeros(N, dtype=np.float32)
     for i in range(N):
@@ -120,13 +125,12 @@ def extract_node_features(adj_z: np.ndarray) -> np.ndarray:
         features.append(np.concatenate([fc_feat, stat_feat, np.array([w_fc, b_fc], dtype=np.float32), topo_feat]))
     return np.stack(features, axis=0).astype(np.float32)
 
-NODE_FEAT_DIM = 116 + 5 + 2 + 2  # fc + stats + within/between + cc/pc
+NODE_FEAT_DIM = 116 + 5 + 2 + 2
 
 # ===============================================================
-# 2. 模型架構 (v9：Graph Attention Network)
+# 2. Model Architecture
 # ===============================================================
 class GATLayer(nn.Module):
-    """Multi-head GAT：可學習連結重要性，保留邊權重作為注意力偏置"""
     def __init__(self, in_dim, out_dim, num_heads=4, dropout=0.2):
         super().__init__()
         assert out_dim % num_heads == 0
@@ -141,34 +145,30 @@ class GATLayer(nn.Module):
 
     def forward(self, h, adj, return_attn=False):
         B, N, _ = h.shape
-        Wh_flat = self.W(h)                                      # (B, N, out_dim)
-        Wh = Wh_flat.view(B, N, self.H, self.d)                  # (B, N, H, d)
+        Wh_flat = self.W(h)
+        Wh = Wh_flat.view(B, N, self.H, self.d)
 
-        # 注意力分數：LeakyReLU(a_src[i] + a_dst[j])，對每個 head 獨立
         e = F.leaky_relu(
-            self.a_src(Wh).squeeze(-1).unsqueeze(2) +            # (B, N, 1, H)
-            self.a_dst(Wh).squeeze(-1).unsqueeze(1),             # (B, 1, N, H)
+            self.a_src(Wh).squeeze(-1).unsqueeze(2) +
+            self.a_dst(Wh).squeeze(-1).unsqueeze(1),
             negative_slope=0.2
-        )                                                         # (B, N, N, H)
+        )
 
-        # 邊權重作為偏置，未連接的節點設為 -inf
         e = e + adj.unsqueeze(-1) * 0.5
         e = e.masked_fill((adj.abs() < 1e-6).unsqueeze(-1), -1e9)
 
-        alpha_raw = F.softmax(e, dim=2)                          # pre-dropout (B, N, N, H)
+        alpha_raw = F.softmax(e, dim=2)
         alpha = self.dropout(alpha_raw)
 
-        # 多頭聚合：(B*H, N, N) @ (B*H, N, d) → (B, N, out_dim)
         alpha_t = alpha.permute(0, 3, 1, 2).reshape(B * self.H, N, N)
         Wh_t    = Wh.permute(0, 2, 1, 3).reshape(B * self.H, N, self.d)
         out = torch.bmm(alpha_t, Wh_t).reshape(B, self.H, N, self.d)
         out = out.permute(0, 2, 1, 3).reshape(B, N, self.out_dim)
 
         out = self.bn(out.reshape(B * N, -1)).reshape(B, N, -1)
-        result = F.elu(self.dropout(out)) + Wh_flat              # residual
+        result = F.elu(self.dropout(out)) + Wh_flat
 
         if return_attn:
-            # 節點重要性 = 被其他節點注意的程度：sum over src, mean over heads → (B, N)
             node_imp = alpha_raw.sum(dim=1).mean(dim=-1).detach().cpu()
             return result, node_imp
         return result
@@ -181,7 +181,6 @@ class FNPGNNv8_KD(nn.Module):
         self.bn_input = nn.BatchNorm1d(hidden_dim)
         self.virtual_node_emb = nn.Parameter(torch.zeros(1, 1, hidden_dim))
 
-        # 3 層 GAT（取代原本 2 層 GCN）
         self.gat1 = GATLayer(hidden_dim, hidden_dim, num_heads=4, dropout=0.2)
         self.gat2 = GATLayer(hidden_dim, hidden_dim, num_heads=4, dropout=0.2)
         self.gat3 = GATLayer(hidden_dim, hidden_dim, num_heads=4, dropout=0.2)
@@ -202,7 +201,6 @@ class FNPGNNv8_KD(nn.Module):
         h = self.bn_input(self.node_encoder(x).reshape(B * N, -1)).reshape(B, N, -1)
         vn = self.virtual_node_emb.expand(B, -1, -1) + h.mean(dim=1, keepdim=True)
 
-        # Layer 1
         if return_attn:
             h, imp1 = self.gat1(h, adj, return_attn=True)
         else:
@@ -210,7 +208,6 @@ class FNPGNNv8_KD(nn.Module):
         vn = self.vn_update(torch.cat([vn, h.mean(dim=1, keepdim=True)], dim=-1))
         h = h + vn.expand(-1, N, -1) * 0.1
 
-        # Layer 2
         if return_attn:
             h_new, imp2 = self.gat2(h, adj, return_attn=True)
         else:
@@ -219,7 +216,6 @@ class FNPGNNv8_KD(nn.Module):
         vn = self.vn_update(torch.cat([vn, h.mean(dim=1, keepdim=True)], dim=-1))
         h = h + vn.expand(-1, N, -1) * 0.1
 
-        # Layer 3
         if return_attn:
             h_new, imp3 = self.gat3(h, adj, return_attn=True)
         else:
@@ -234,26 +230,65 @@ class FNPGNNv8_KD(nn.Module):
         if return_embedding: return F.normalize(self.projector(flat), dim=-1)
         logits = self.classifier(flat)
         if return_attn:
-            # 三層 importance 平均 → (B, N)
             node_imp = torch.stack([imp1, imp2, imp3], dim=0).mean(dim=0)
             return logits, flat, node_imp
         return logits, flat
 
+
 # ===============================================================
-# 3. 蒸餾與對比損失函數
+# 3. DANN Components
 # ===============================================================
-# 🌟 V8 跨模態 KD 核心：MSE 蒸餾！允許求同存異
+class GradientReversalFunction(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, x, alpha):
+        ctx.alpha = alpha
+        return x.view_as(x)
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        return grad_output.neg() * ctx.alpha, None
+
+
+class GradientReversalLayer(nn.Module):
+    def forward(self, x, alpha=1.0):
+        return GradientReversalFunction.apply(x, alpha)
+
+
+class DomainClassifier(nn.Module):
+    """Binary domain classifier (TPMIC=0, ADNI=1) applied after GRL."""
+    def __init__(self, input_dim=N_NETWORKS * HIDDEN_DIM + HIDDEN_DIM):
+        super().__init__()
+        self.grl = GradientReversalLayer()
+        self.net = nn.Sequential(
+            nn.Linear(input_dim, 256),
+            nn.ReLU(),
+            nn.Dropout(0.3),
+            nn.Linear(256, 1)
+        )
+
+    def forward(self, flat, alpha=1.0):
+        return self.net(self.grl(flat, alpha))
+
+
+def get_dann_alpha(epoch, total_epochs):
+    """Standard DANN alpha schedule: ramps from 0 to 1 over training."""
+    p = epoch / total_epochs
+    return float(2.0 / (1.0 + np.exp(-10.0 * p)) - 1.0)
+
+
+# ===============================================================
+# 4. Loss functions
+# ===============================================================
 def distillation_loss(student_logits, teacher_probs):
-    """使用 KLDivLoss 逼近老師的機率分佈"""
     student_log_probs = F.log_softmax(student_logits, dim=1)
-    # reduction="batchmean" 是 PyTorch 計算 KLD 的標準寫法
-    loss = nn.KLDivLoss(reduction="batchmean")(student_log_probs, teacher_probs)
-    return loss
+    return nn.KLDivLoss(reduction="batchmean")(student_log_probs, teacher_probs)
+
 
 class SupConLoss(nn.Module):
     def __init__(self, temperature=CONTRA_TEMP):
         super().__init__()
         self.temp = temperature
+
     def forward(self, features, labels):
         B = features.shape[0]
         if B < 2: return torch.tensor(0.0, device=features.device)
@@ -267,8 +302,9 @@ class SupConLoss(nn.Module):
         loss = -(pos_mask * (sim - log_denom)).sum(dim=1) / (pos_mask.sum(dim=1) + 1e-8)
         return loss.mean()
 
+
 # ===============================================================
-# 4. KD 資料集
+# 5. Dataset (adds domain_label and is_nc_or_ad for DANN)
 # ===============================================================
 def get_subject_id(path_str):
     basename = os.path.basename(str(path_str))
@@ -276,19 +312,26 @@ def get_subject_id(path_str):
     clean = re.sub(r'^(sub-|sub_|old_dswau)', '', clean)
     return clean.strip()
 
+
 class fMRIDataset_KD(Dataset):
     def __init__(self, dataframe, teacher_dict=None):
         self.data_cache = []
         self.has_teacher_count = 0
-        
+
         for _, row in dataframe.iterrows():
             adj_raw = np.load(row['matrix_path'])
             label = row['current_task_label']
             subj_id = get_subject_id(row['matrix_path'])
-            
+
             teacher_prob = teacher_dict.get(subj_id, None) if teacher_dict else None
             has_soft = teacher_prob is not None
             if has_soft: self.has_teacher_count += 1
+
+            src = row.get('source', 'TPMIC') if hasattr(row, 'get') else row['source'] if 'source' in row.index else 'TPMIC'
+            domain_label = 1 if str(src).upper() == 'ADNI' else 0
+
+            diag = str(row.get('diagnosis', '') if hasattr(row, 'get') else row['diagnosis']).upper()
+            is_nc_or_ad = diag in ('NC', 'AD')
 
             adj_z = np.arctanh(np.clip(adj_raw, -0.999, 0.999))
             x_feat = extract_node_features(adj_z)
@@ -310,32 +353,35 @@ class fMRIDataset_KD(Dataset):
                 'x': torch.FloatTensor(x_feat),
                 'adj': torch.FloatTensor(adj_norm),
                 'label': torch.tensor(label, dtype=torch.long),
-                # Teacher uses ImageFolder alphabetical order (AD=0, NC=1),
-                # but student uses task order (class_a=0, class_b=1). Flip to align.
                 'soft_label': torch.FloatTensor(teacher_prob).flip(0) if has_soft else torch.zeros(2),
                 'has_soft': torch.tensor(has_soft, dtype=torch.bool),
-                'subj_id': subj_id 
+                'subj_id': subj_id,
+                'domain_label': torch.tensor(domain_label, dtype=torch.float32),
+                'is_nc_or_ad': torch.tensor(is_nc_or_ad, dtype=torch.bool),
             })
 
     def __len__(self): return len(self.data_cache)
     def __getitem__(self, idx): return self.data_cache[idx]
 
+
 # ===============================================================
-# 5. 訓練任務迴圈
+# 6. Training loop
 # ===============================================================
 def load_teacher_probs(task_pair):
     safe_name = f"{task_pair[0]}_vs_{task_pair[1]}"
     npy_path = os.path.join(TEACHER_PROBS_DIR, f"teacher_logits_{safe_name}.npy")
     if os.path.exists(npy_path):
         teacher_dict = np.load(npy_path, allow_pickle=True).item()
-        print(f"  📚 成功載入老師 ({safe_name}) 的筆記，字典內共 {len(teacher_dict)} 筆獨立病歷號。")
+        print(f"  Teacher probs loaded ({safe_name}): {len(teacher_dict)} subjects")
         return teacher_dict
     else:
-        print(f"  ⚠️ 找不到老師筆記: {npy_path}，將退回純 CE 訓練。")
+        print(f"  Teacher probs not found: {npy_path}, using CE only")
         return {}
 
-def run_task_kd(df_task, task_pair, teacher_dict, device, seed, ckpt_dir=None):
-    """單一 seed 的 5-fold 訓練，回傳 OOF probs 與 true labels"""
+
+def run_task_dann(df_task, task_pair, teacher_dict, device, seed,
+                  lambda_domain=0.3, ckpt_dir=None):
+    """DANN method=2: domain loss for all tasks; MCI subjects masked out."""
     class_a, class_b = task_pair
     labels_arr = df_task['current_task_label'].values
     strata_arr = (
@@ -348,28 +394,32 @@ def run_task_kd(df_task, task_pair, teacher_dict, device, seed, ckpt_dir=None):
     skf = StratifiedKFold(n_splits=N_FOLDS, shuffle=True, random_state=seed)
     contra_loss_fn = SupConLoss(temperature=CONTRA_TEMP)
 
-    all_val_prob, all_val_true = [None] * len(df_task), [None] * len(df_task)
-    all_val_attn = [None] * len(df_task)   # GAT node importance per subject
-    all_val_flat = [None] * len(df_task)   # 1280-d flat embedding for domain alignment
+    all_val_prob = [None] * len(df_task)
+    all_val_true = [None] * len(df_task)
+    all_val_attn = [None] * len(df_task)
+    all_val_flat = [None] * len(df_task)
 
-    seed_best_acc, seed_best_state = 0.0, None  # 跨 fold 追蹤最佳模型
+    seed_best_acc, seed_best_state = 0.0, None
 
     for fold, (train_idx, val_idx) in enumerate(skf.split(df_task, strata_arr)):
         print(f"    Fold {fold+1}/{N_FOLDS}", end="  ")
         train_df = df_task.iloc[train_idx].reset_index(drop=True)
-        val_df = df_task.iloc[val_idx].reset_index(drop=True)
+        val_df   = df_task.iloc[val_idx].reset_index(drop=True)
 
         train_ds = fMRIDataset_KD(train_df, teacher_dict)
-        val_ds = fMRIDataset_KD(val_df, teacher_dict)
+        val_ds   = fMRIDataset_KD(val_df, teacher_dict)
 
         class_counts = np.bincount(train_df['current_task_label'].values)
         weights = [1.0 / class_counts[l] for l in train_df['current_task_label'].values]
         sampler = WeightedRandomSampler(weights, len(weights), replacement=True)
         train_loader = DataLoader(train_ds, batch_size=BATCH_SIZE, sampler=sampler, drop_last=True)
-        val_loader = DataLoader(val_ds, batch_size=1)
+        val_loader   = DataLoader(val_ds, batch_size=1)
 
         model = FNPGNNv8_KD().to(device)
-        optimizer = torch.optim.AdamW(model.parameters(), lr=LR, weight_decay=WEIGHT_DECAY)
+        domain_clf = DomainClassifier().to(device)
+
+        all_params = list(model.parameters()) + list(domain_clf.parameters())
+        optimizer = torch.optim.AdamW(all_params, lr=LR, weight_decay=WEIGHT_DECAY)
         scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer, T_0=50, T_mult=2, eta_min=1e-6)
         ce_loss_fn = nn.CrossEntropyLoss(label_smoothing=0.1)
 
@@ -377,25 +427,44 @@ def run_task_kd(df_task, task_pair, teacher_dict, device, seed, ckpt_dir=None):
 
         for epoch in range(EPOCHS):
             model.train()
+            domain_clf.train()
+            alpha = get_dann_alpha(epoch, EPOCHS)
+
             for b in train_loader:
-                x, adj, lbl = b['x'].to(device), b['adj'].to(device), b['label'].to(device)
-                soft_lbl, has_soft = b['soft_label'].to(device), b['has_soft'].to(device)
+                x       = b['x'].to(device)
+                adj     = b['adj'].to(device)
+                lbl     = b['label'].to(device)
+                soft_lbl  = b['soft_label'].to(device)
+                has_soft  = b['has_soft'].to(device)
+                dom_lbl   = b['domain_label'].to(device)
+                is_ncad   = b['is_nc_or_ad'].to(device)
 
                 logits, flat = model(x, adj)
                 proj = F.normalize(model.projector(flat), dim=-1)
+
                 loss_ce = ce_loss_fn(logits, lbl)
 
                 loss_kd = torch.tensor(0.0, device=device)
-                valid_kd_mask = has_soft == True
-                if valid_kd_mask.any():
-                    loss_kd = distillation_loss(logits[valid_kd_mask], soft_lbl[valid_kd_mask])
+                valid_kd = has_soft == True
+                if valid_kd.any():
+                    loss_kd = distillation_loss(logits[valid_kd], soft_lbl[valid_kd])
 
                 loss_contra = contra_loss_fn(proj, lbl)
-                loss = (LAMBDA_CE * loss_ce) + (LAMBDA_KD * loss_kd) + (LAMBDA_CONTRA * loss_contra)
+
+                # DANN method=2: only NC/AD subjects contribute to domain loss
+                loss_domain = torch.tensor(0.0, device=device)
+                if is_ncad.any():
+                    domain_logit = domain_clf(flat[is_ncad], alpha)
+                    loss_domain = F.binary_cross_entropy_with_logits(
+                        domain_logit.squeeze(1), dom_lbl[is_ncad])
+
+                loss = (LAMBDA_CE * loss_ce + LAMBDA_KD * loss_kd
+                        + LAMBDA_CONTRA * loss_contra + lambda_domain * loss_domain)
 
                 optimizer.zero_grad()
                 loss.backward()
                 torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+                torch.nn.utils.clip_grad_norm_(domain_clf.parameters(), 1.0)
                 optimizer.step()
 
             scheduler.step()
@@ -425,32 +494,30 @@ def run_task_kd(df_task, task_pair, teacher_dict, device, seed, ckpt_dir=None):
                 out, flat, node_imp = model(b['x'].to(device), b['adj'].to(device), return_attn=True)
                 all_val_prob[sample_i] = torch.softmax(out, dim=1).cpu().numpy()[0]
                 all_val_true[sample_i] = b['label'].item()
-                all_val_attn[sample_i] = node_imp[0].numpy()   # (N,)
-                all_val_flat[sample_i] = flat[0].detach().cpu().numpy()  # (1280,)
+                all_val_attn[sample_i] = node_imp[0].numpy()
+                all_val_flat[sample_i] = flat[0].detach().cpu().numpy()
 
         print(f"best val balanced_acc: {best_val_acc*100:.1f}%")
 
-        # 跨 fold 追蹤：保留最佳 fold 的 model state
         if best_val_acc > seed_best_acc:
             seed_best_acc = best_val_acc
             seed_best_state = {k: v.cpu().clone() for k, v in model.state_dict().items()}
 
-    # 儲存 seed 最佳 checkpoint
     if ckpt_dir is not None and seed_best_state is not None:
         safe_name = f"{task_pair[0]}_vs_{task_pair[1]}"
         os.makedirs(ckpt_dir, exist_ok=True)
-        ckpt_path = os.path.join(ckpt_dir, f"gnn_{safe_name}_seed{seed}.pt")
+        ckpt_path = os.path.join(ckpt_dir, f"e5_{safe_name}_seed{seed}.pt")
         torch.save(seed_best_state, ckpt_path)
-        print(f"  💾 checkpoint → {ckpt_path}")
 
-    return np.stack(all_val_prob, axis=0), all_val_true, np.stack(all_val_attn, axis=0), np.stack(all_val_flat, axis=0)
+    return (np.stack(all_val_prob, axis=0), all_val_true,
+            np.stack(all_val_attn, axis=0), np.stack(all_val_flat, axis=0))
 
 
 def run_task_multi_seed(df_full, task_pair, device):
-    """Multi-run ensemble：對每個 seed 跑完整 5-fold，平均 OOF probs 後再與 teacher ensemble"""
     class_a, class_b = task_pair
     task_name = f"{class_a} vs {class_b}"
-    print(f"\n{'='*60}\n  Task: {task_name}\n{'='*60}")
+    lambda_domain = LAMBDA_DOMAIN_PER_TASK[task_pair]
+    print(f"\n{'='*60}\n  Task: {task_name}  [E5 DANN method=2, λ_domain={lambda_domain}]\n{'='*60}")
 
     df_task = df_full[df_full['diagnosis'].isin([class_a, class_b])].copy()
     df_task['current_task_label'] = df_task['diagnosis'].map({class_a: 0, class_b: 1})
@@ -458,29 +525,32 @@ def run_task_multi_seed(df_full, task_pair, device):
 
     teacher_dict = load_teacher_probs(task_pair)
     tmp_ds = fMRIDataset_KD(df_task, teacher_dict)
-    print(f"  🔗 共 {len(tmp_ds)} 人，成功配對老師標籤者 {tmp_ds.has_teacher_count} 人。")
+    tpmic_n = sum(1 for d in tmp_ds.data_cache if d['domain_label'].item() == 0)
+    adni_n  = sum(1 for d in tmp_ds.data_cache if d['domain_label'].item() == 1)
+    print(f"  Subjects: {len(tmp_ds)} total  (TPMIC={tpmic_n}, ADNI={adni_n})")
+    print(f"  Teacher labels matched: {tmp_ds.has_teacher_count}")
     del tmp_ds
 
-    # ── 多 seed 跑，收集 OOF probs + attention ──────────────────
-    ckpt_dir = os.path.join(TEACHER_PROBS_DIR, "gnn_checkpoints")
+    ckpt_dir = os.path.join(TEACHER_PROBS_DIR, "e5_checkpoints")
     seed_probs, seed_attns, seed_flats = [], [], []
     for seed in SEEDS:
         print(f"\n  [Seed {seed}]")
-        probs, all_true, attns, flats = run_task_kd(df_task, task_pair, teacher_dict, device, seed, ckpt_dir=ckpt_dir)
+        probs, all_true, attns, flats = run_task_dann(
+            df_task, task_pair, teacher_dict, device, seed,
+            lambda_domain=lambda_domain, ckpt_dir=ckpt_dir)
         seed_probs.append(probs)
         seed_attns.append(attns)
         seed_flats.append(flats)
         s_acc = accuracy_score(all_true, probs.argmax(axis=1))
-        print(f"    → Seed {seed} OOF acc: {s_acc*100:.1f}%")
+        print(f"    Seed {seed} OOF acc: {s_acc*100:.1f}%")
 
-    # ── 平均 OOF probs（multi-run ensemble 核心）────────────────
-    avg_probs = np.mean(seed_probs, axis=0)   # (N, 2)
-    avg_attn  = np.mean(seed_attns, axis=0)   # (N_subj, N_roi)
-    avg_flats = np.mean(seed_flats, axis=0)   # (N_subj, 1280)
-    all_pred = avg_probs.argmax(axis=1).tolist()
+    avg_probs = np.mean(seed_probs, axis=0)
+    avg_attn  = np.mean(seed_attns, axis=0)
+    avg_flats = np.mean(seed_flats, axis=0)
+    all_pred  = avg_probs.argmax(axis=1).tolist()
     acc = accuracy_score(all_true, all_pred)
-    cm = confusion_matrix(all_true, all_pred)
-    try: auc = roc_auc_score(all_true, avg_probs[:, 1])
+    cm  = confusion_matrix(all_true, all_pred)
+    try:   auc = roc_auc_score(all_true, avg_probs[:, 1])
     except: auc = float('nan')
     print(f"\n  Multi-seed avg OOF: {acc*100:.1f}% / AUC {auc:.3f}")
 
@@ -490,7 +560,6 @@ def run_task_multi_seed(df_full, task_pair, device):
     except Exception:
         _fpr, _tpr = np.array([0.0, 1.0]), np.array([0.0, 1.0])
 
-    # ── Inference-time Ensemble with Teacher ────────────────────
     subj_ids = df_task['matrix_path'].apply(get_subject_id).tolist()
     best_ens_acc, best_ens_auc, best_w = acc, auc, 1.0
     for gnn_w in [0.9, 0.8, 0.7, 0.6, 0.5]:
@@ -504,39 +573,14 @@ def run_task_multi_seed(df_full, task_pair, device):
         if ens_acc > best_ens_acc:
             best_ens_acc, best_ens_auc, best_w = ens_acc, ens_auc, gnn_w
     if best_w < 1.0:
-        print(f"  🔀 Ensemble best: GNN×{best_w:.1f} + Teacher×{1-best_w:.1f} → {best_ens_acc*100:.1f}% / AUC {best_ens_auc:.3f}")
-    else:
-        print(f"  🔀 Ensemble: GNN alone is best for {task_name}")
-
-    # ── 儲存 attention（每位受試者的 ROI 重要性）───────────────
-    safe_name = f"{class_a}_vs_{class_b}"
-    attn_dict = {
-        get_subject_id(df_task.iloc[i]['matrix_path']): {
-            'importance': avg_attn[i],          # (116,) float32
-            'label':      int(all_true[i]),
-            'prob':       avg_probs[i],          # (2,) softmax
-        }
-        for i in range(len(df_task))
-    }
-    attn_path = os.path.join(TEACHER_PROBS_DIR, f"gnn_attention_{safe_name}.npy")
-    np.save(attn_path, attn_dict, allow_pickle=True)
-    print(f"  💾 Attention 已儲存 → {attn_path}")
-
-    # GNN 1280-d flat embeddings（供 E2 domain alignment 用）
-    emb_dict = {
-        get_subject_id(df_task.iloc[i]['matrix_path']): avg_flats[i].astype(np.float32)
-        for i in range(len(df_task))
-    }
-    emb_path = os.path.join(TEACHER_PROBS_DIR, f"gnn_embeddings_{safe_name}.npy")
-    np.save(emb_path, emb_dict, allow_pickle=True)
-    print(f"  💾 GNN embeddings 已儲存 → {emb_path}")
-    print(f"  (shape per subject: (1280,), {len(emb_dict)} subjects)")
+        print(f"  Ensemble: GNN×{best_w:.1f} + Teacher×{1-best_w:.1f} → {best_ens_acc*100:.1f}% / AUC {best_ens_auc:.3f}")
 
     return (acc, auc, cm, best_ens_acc, best_ens_auc, best_w,
             avg_probs, np.array(all_true), df_task['matrix_path'].tolist(), _fpr, _tpr)
 
+
 # ===============================================================
-# 6. Data Loader
+# 7. Data Loader
 # ===============================================================
 def load_data():
     valid_data, seen_paths = [], set()
@@ -544,7 +588,9 @@ def load_data():
         if not os.path.exists(path): continue
         df = pd.read_csv(path)
         for _, row in df.iterrows():
-            m_path = row.get('matrix_path') or (os.path.join(MATRIX_DIR, f"{row['new_id_base']}_matrix_116.npy") if pd.notna(row.get('new_id_base')) else None) or (os.path.join(MATRIX_DIR, f"{row['Subject']}_matrix_116.npy") if pd.notna(row.get('Subject')) else None)
+            m_path = (row.get('matrix_path')
+                      or (os.path.join(MATRIX_DIR, f"{row['new_id_base']}_matrix_116.npy") if pd.notna(row.get('new_id_base')) else None)
+                      or (os.path.join(MATRIX_DIR, f"{row['Subject']}_matrix_116.npy") if pd.notna(row.get('Subject')) else None))
             if not (m_path and os.path.exists(m_path)) or m_path in seen_paths: continue
             try:
                 if np.load(m_path).shape != (116, 116): continue
@@ -556,54 +602,46 @@ def load_data():
             except: continue
     return pd.DataFrame(valid_data)
 
-def main():
-    print("🚀 FNP-GNN v10 (GAT + Cross-Modal KD + Multi-run Ensemble)")
-    print("   架構: 3-layer GAT + Virtual Node + Network Pooling")
-    print(f"   蒸餾: MSE Loss | CE ({LAMBDA_CE}) + KD ({LAMBDA_KD}) + Contra ({LAMBDA_CONTRA})")
-    print(f"   Multi-run: seeds={SEEDS} → 平均 OOF probs 後再與 teacher ensemble")
-    
-    df_full = load_data()
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-    EXP_NAME = "E1_balanced_sampling"
+# ===============================================================
+# 8. Main
+# ===============================================================
+def run_experiment(df_full, device, exp_name="E5_hybrid_lambda"):
+    print(f"\n{'#'*70}")
+    print(f"  E5 DANN — Hybrid λ_domain (best-of-series per task)")
+    print(f"  NC_vs_AD: λ={LAMBDA_DOMAIN_PER_TASK[('NC','AD')]}  "
+          f"NC_vs_MCI: λ={LAMBDA_DOMAIN_PER_TASK[('NC','MCI')]}  "
+          f"MCI_vs_AD: λ={LAMBDA_DOMAIN_PER_TASK[('MCI','AD')]}")
+    print(f"{'#'*70}")
+
     tasks = [('NC', 'AD'), ('NC', 'MCI'), ('MCI', 'AD')]
-    results = {}
-    exp_metrics = {}   # task_safe → {auc, acc, fpr, tpr}
-    all_oof    = {}    # task_safe → (avg_probs, all_true, matrix_paths)
+    results    = {}
+    exp_metrics = {}
+    all_oof    = {}
 
     fig, axes = plt.subplots(1, 3, figsize=(18, 5))
-    fig.suptitle('FNP-GNN v8 (Cross-Modal KD) - Confusion Matrices', fontsize=16, fontweight='bold')
+    fig.suptitle('E5 Hybrid λ_domain - Confusion Matrices', fontsize=16, fontweight='bold')
 
     for idx, task in enumerate(tasks):
         (acc, auc, cm, ens_acc, ens_auc, best_w,
-         avg_probs, all_true, matrix_paths, fpr, tpr) = run_task_multi_seed(df_full, task, device)
+         avg_probs, all_true, matrix_paths, fpr, tpr) = run_task_multi_seed(
+            df_full, task, device)
+
         results[f"{task[0]} vs {task[1]}"] = (acc, auc, cm, ens_acc, ens_auc, best_w)
         safe = f"{task[0]}_vs_{task[1]}"
         exp_metrics[safe] = {"auc": float(auc), "acc": float(acc),
-                             "fpr": fpr.tolist(), "tpr": tpr.tolist()}
+                              "fpr": fpr.tolist(), "tpr": tpr.tolist()}
         all_oof[safe] = (avg_probs, all_true, matrix_paths)
-        sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', ax=axes[idx], xticklabels=[task[0], task[1]], yticklabels=[task[0], task[1]], annot_kws={"size": 16})
+
+        sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', ax=axes[idx],
+                    xticklabels=[task[0], task[1]], yticklabels=[task[0], task[1]],
+                    annot_kws={"size": 16})
         axes[idx].set_title(f"{task[0]} vs {task[1]}\nAcc: {acc*100:.1f}%  AUC: {auc:.3f}", fontsize=14)
 
-    print("\n" + "="*60)
-    print("🏆 FNP-GNN v8 最終效能總榜單")
-    print("="*60)
-    print(f"{'Task':<16} {'GNN only':>10} {'AUC':>7}   {'Ensemble':>10} {'AUC':>7}  {'w_GNN':>6}")
-    print("-"*60)
-    for task_name, (acc, auc, _, ens_acc, ens_auc, best_w) in results.items():
-        flag_gnn = "✅" if acc >= 0.80 else "⚠️ "
-        flag_ens = "✅" if ens_acc >= 0.80 else "⚠️ "
-        print(f"{flag_gnn} {task_name:<14} {acc*100:>8.1f}%  {auc:>7.3f}   {flag_ens}{ens_acc*100:>7.1f}%  {ens_auc:>7.3f}  {best_w:>5.1f}")
-
-    plt.tight_layout()
-    plt.savefig('fmri_gnn_v8_kd_confusion_matrices.png', dpi=300)
-
-    # ── Save experiment results ──────────────────────────────────────
     print(f"\n{'='*60}")
-    print(f"  Saving experiment results → results/{EXP_NAME}/")
+    print(f"  Saving results → results/{exp_name}/")
     print(f"{'='*60}")
 
-    # Load baseline for comparison if it exists
     baseline_path = os.path.join(ser.RESULTS_DIR, "baseline", "metrics.json")
     baseline_metrics = None
     if os.path.exists(baseline_path):
@@ -611,14 +649,63 @@ def main():
         with open(baseline_path) as f:
             baseline_metrics = json.load(f)
 
-    ser.save_metrics(EXP_NAME, exp_metrics)
-    ser.plot_roc_comparison(EXP_NAME, exp_metrics, baseline_metrics=baseline_metrics)
+    ser.save_metrics(exp_name, exp_metrics)
+    ser.plot_roc_comparison(exp_name, exp_metrics, baseline_metrics=baseline_metrics)
 
     for safe, (avg_probs, all_true, matrix_paths) in all_oof.items():
         y_pred = avg_probs.argmax(axis=1)
-        ser.plot_confusion_matrix(EXP_NAME, all_true, y_pred, safe)
+        ser.plot_confusion_matrix(exp_name, all_true, y_pred, safe)
 
     ser.update_comparison_chart()
+
+    plt.tight_layout()
+    out_dir = os.path.join(ser.RESULTS_DIR, exp_name)
+    os.makedirs(out_dir, exist_ok=True)
+    plt.savefig(os.path.join(out_dir, 'confusion_matrices.png'), dpi=300)
+    plt.close()
+
+    print(f"\n{'='*60}")
+    print(f"  Final results — {exp_name}")
+    print(f"{'='*60}")
+    print(f"{'Task':<16} {'ACC':>8} {'AUC':>8}   {'Ens ACC':>8} {'Ens AUC':>8}")
+    print("-"*60)
+    for task_name, (acc, auc, _, ens_acc, ens_auc, best_w) in results.items():
+        print(f"  {task_name:<14} {acc*100:>7.1f}%  {auc:>7.3f}   {ens_acc*100:>7.1f}%  {ens_auc:>7.3f}")
+
+    return exp_metrics
+
+
+def main():
+    print("E5 DANN — Hybrid λ_domain (best-of-series per task)")
+    print(f"LAMBDA_DOMAIN_PER_TASK={LAMBDA_DOMAIN_PER_TASK}, seeds={SEEDS}")
+
+    df_full = load_data()
+    print(f"\nDataset: {len(df_full)} subjects total")
+    print(df_full['source'].value_counts().to_string())
+
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    print(f"Device: {device}")
+
+    exp_metrics = run_experiment(df_full, device, exp_name="E5_Refine_v3")
+
+    # Compare E3 method2 vs E5
+    import json
+    e3_path = os.path.join(ser.RESULTS_DIR, "E3_domain_adversarial", "E3_method2", "metrics.json")
+    if os.path.exists(e3_path):
+        with open(e3_path) as f:
+            e3_metrics = json.load(f)
+        print(f"\n{'='*70}")
+        print("  E3 Method2 vs E5 Comparison")
+        print(f"{'='*70}")
+        print(f"{'Task':<16} {'E3 AUC':>8} {'E5 AUC':>8}  {'Δ AUC':>8}  {'Winner':>8}")
+        print("-"*60)
+        for task in ["NC_vs_AD", "NC_vs_MCI", "MCI_vs_AD"]:
+            a3 = e3_metrics.get(task, {}).get('auc', float('nan'))
+            a5 = exp_metrics.get(task, {}).get('auc', float('nan'))
+            delta = a5 - a3
+            winner = "E5" if delta > 0 else ("E3" if delta < 0 else "Tie")
+            print(f"  {task:<14} {a3:>7.3f}  {a5:>7.3f}  {delta:>+7.3f}   {winner}")
+
 
 if __name__ == "__main__":
     main()

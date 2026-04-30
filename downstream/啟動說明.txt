@@ -1,0 +1,28 @@
+============================
+KGRS 系統啟動說明
+============================
+
+【後端】
+1. 開一個終端機，切換到後端目錄並啟用 conda 環境：
+
+    conda activate AD
+    cd /home/wei-chi/Data/script/downstream
+    uvicorn api_server:app --host 0.0.0.0 --port 8080 --reload
+
+   後端啟動後監聽 http://localhost:8080
+
+【前端】
+2. 再開一個終端機，切換到前端目錄：
+
+    cd /home/wei-chi/Data/script/downstream/kgrs-frontend
+    npm run dev
+
+   前端啟動後開啟瀏覽器前往 http://localhost:5173
+
+============================
+注意事項
+============================
+- .env 檔案位於 /home/wei-chi/Data/script/.env
+  後端程式碼會自動載入，不需要手動 source
+- Neo4j 資料庫需要在背景執行，否則分析時會出現 AuthError
+- 每次啟動必須先啟動後端，再啟動前端

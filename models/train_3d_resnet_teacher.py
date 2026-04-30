@@ -102,8 +102,8 @@ def get_3d_data_dicts(task_pair):
             continue
         folder_adni = os.path.join(DATA_DIR_ADNI, class_name)
         if os.path.exists(folder_adni):
-            files = list(set(glob.glob(
-                os.path.join(folder_adni, "**", "T1", "*.nii.gz"), recursive=True)))
+            # 修正後的 glob: 直接抓取目錄下的 .nii.gz
+            files = list(set(glob.glob(os.path.join(folder_adni, "*.nii.gz"))))
             for fp in files:
                 data_dicts.append({"image": fp, "label": label})
 
@@ -354,6 +354,7 @@ def run_3d_task(task_pair, device):
     all_true, all_pred, all_prob = [], [], []
     all_prob_full   = []   # (N, 2) — full softmax distribution for KD
     all_image_paths = []   # T1 路徑，用於跨 modality 對齊
+    all_embeddings  = []   # (N, 512) — fc 512-d embedding for domain alignment
 
     # 追蹤全局最佳 fold 模型
     global_best_acc   = 0.0
@@ -413,6 +414,10 @@ def run_3d_task(task_pair, device):
         final_loader = DataLoader(final_val_ds, batch_size=1, num_workers=2)
 
         model.eval()
+        _emb_buf = {}
+        _hook = model.fc[2].register_forward_hook(
+            lambda m, inp, out: _emb_buf.update({'e': out.detach().cpu()})
+        )
         with torch.no_grad():
             for local_i, batch_data in enumerate(final_loader):
                 inp = batch_data["image"].to(device)
@@ -425,6 +430,8 @@ def run_3d_task(task_pair, device):
                 all_prob_full.append(prob[0].cpu().numpy())
                 # 直接從 val_files 取路徑，不依賴 MONAI meta_dict
                 all_image_paths.append(str(val_files[local_i]["image"]))
+                all_embeddings.append(_emb_buf['e'].numpy()[0])  # (512,)
+        _hook.remove()
 
     acc = accuracy_score(all_true, all_pred)
     cm  = confusion_matrix(all_true, all_pred)
@@ -493,6 +500,18 @@ def run_3d_task(task_pair, device):
     np.save(tl_path, teacher_logits_dict, allow_pickle=True)
     print(f"  Saved OOF teacher_logits → {tl_path}")
     print(f"  ({len(teacher_logits_dict)} subjects aligned, {skipped} skipped)")
+
+    # 4. OOF 512-d embeddings（供 E2 domain alignment 用）
+    emb_arr  = np.stack(all_embeddings, axis=0)   # (N, 512)
+    emb_dict = {}
+    for path, emb in zip(all_image_paths, emb_arr):
+        sid = get_subject_id(path)
+        if sid:
+            emb_dict[sid] = emb
+    emb_path = os.path.join(MODEL_SAVE_DIR, f"teacher_embeddings_{safe_name}.npy")
+    np.save(emb_path, emb_dict, allow_pickle=True)
+    print(f"  Saved OOF teacher_embeddings → {emb_path}")
+    print(f"  (shape per subject: (512,), {len(emb_dict)} subjects)")
 
     return acc, auc, cm
 

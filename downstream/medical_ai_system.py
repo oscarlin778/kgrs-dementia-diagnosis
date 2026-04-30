@@ -214,7 +214,7 @@ class MedicalAISystem:
             confidence, pred_class = torch.max(probs, dim=1)
             return pred_class.item(), confidence.item() * 100
 
-    def generate_report(self, patient_id, pred, conf, top_regions):
+    def generate_report(self, patient_id, pred, conf, top_regions, multimodal_context=None):
         patient_data = self.get_patient_data(patient_id)
         net_analysis_text = ""
         if patient_data:
@@ -223,6 +223,7 @@ class MedicalAISystem:
                 net_analysis_text = "\n".join(net_findings)
             else:
                 net_analysis_text = "各大腦網路連接強度在正常範圍內。"
+
         context_list = []
         for region in top_regions:
             matched = False
@@ -234,21 +235,42 @@ class MedicalAISystem:
             if not matched:
                 context_list.append(f"- {region}")
         context_str = "\n".join(context_list)
+
         diag_str = "阿茲海默症 (AD)" if pred == 1 else "正常老化 (NC)"
+
         if self.llm_model:
-            prompt = f"""
-            你是一位資深神經內科醫師。請根據以下數據撰寫「AI 輔助診斷報告」。
-            【病患數據】
-            - 編號: {patient_id}
-            - AI 預測: {diag_str}
-            - 模型信心度: {conf:.1f}%
-            - 關鍵異常腦區 (GNN Saliency): {', '.join(top_regions)}
-            【網路層級分析 (Network Analysis)】
-            {net_analysis_text}
-            【醫學證據資料庫】
-            {context_str}
-            請用繁體中文撰寫。
-            """
+            if multimodal_context:
+                prompt = f"""
+                你是一位專精於失智症神經影像診斷的臨床 AI 助理。請根據以下多模態影像分析結果撰寫「AI 輔助診斷報告」。
+
+                【病患數據】
+                - 編號: {patient_id}
+                - 綜合預測結果: {diag_str} (信心度: {conf:.1f}%)
+
+                【多模態證據背景】
+                {multimodal_context}
+
+                【指示】
+                - 請明確區分「結構性發現」(sMRI) 與「功能性發現」(fMRI) 章節。
+                - ⚠️ 強制要求：必須引用「多模態證據背景」中的文獻內容來支持診斷建議，並標註出處。
+                - 增加「模態一致性」註記：若兩者預測一致，則說明「結構與功能成像結果一致」；若不一致則提示風險。
+
+                請用繁體中文撰寫。
+                """
+            else:
+                prompt = f"""
+                你是一位資深神經內科醫師。請根據以下數據撰寫「AI 輔助診斷報告」。
+                【病患數據】
+                - 編號: {patient_id}
+                - AI 預測: {diag_str}
+                - 模型信心度: {conf:.1f}%
+                - 關鍵異常腦區 (GNN Saliency): {', '.join(top_regions)}
+                【網路層級分析 (Network Analysis)】
+                {net_analysis_text}
+                【醫學證據資料庫】
+                {context_str}
+                請用繁體中文撰寫。
+                """
             try:
                 print("🤖 呼叫 LLM 撰寫報告...", file=sys.stderr)
                 return self.llm_model.generate_content(prompt).text

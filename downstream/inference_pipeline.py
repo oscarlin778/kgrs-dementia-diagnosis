@@ -2,37 +2,51 @@
 Dual-Modal Inference Pipeline: fMRI + sMRI → GraphRAG Clinical Report
 流程：FC matrix + T1 NIfTI → GNN / 3D ResNet 雙流推論 → GAT attention → Neo4j → Gemma 報告
 
+Performance:
+    fMRI only:  NC/AD AUC=0.784 ACC=79.3% | NC/MCI AUC=0.658 ACC=63.0% | MCI/AD AUC=0.687 ACC=72.0%
+    sMRI only:  NC/AD AUC=0.825 ACC=85.0% | NC/MCI AUC=0.703 ACC=71.0% | MCI/AD AUC=0.848 ACC=83.7%
+    Both:       Classification from sMRI + functional evidence from fMRI for report
+
 Usage (自動雙模態，T1 會依 subject_id 自動尋找):
     python inference_pipeline.py \
         --matrix /path/sub_matrix_116.npy \
         --subject_id sub-011_S_6303_AD
-
-Usage (手動指定 T1):
-    python inference_pipeline.py \
-        --matrix /path/sub_matrix_116.npy \
-        --t1_image /path/sub_T1.nii.gz \
-        --subject_id sub-011_S_6303_AD
-
-Usage (fMRI only，找不到 T1 時自動 fallback):
-    python inference_pipeline.py \
-        --matrix /path/sub_matrix_116.npy \
-        --subject_id sub_0001_NC
 """
 
 import os, sys, argparse, warnings
+from dataclasses import dataclass
+from typing import Optional, Union, List, Dict
 import numpy as np
 import torch
 import torch.nn.functional as F
 import requests
+import nibabel as nib
 from monai.networks.nets import resnet50 as monai_resnet50
 
 warnings.filterwarnings("ignore")
 sys.path.append(os.path.join(os.path.dirname(__file__), "../models"))
 
 from train_hierarchical_gnn_kd import (
-    FNPGNNv8_KD, extract_node_features,
-    K_RATIO, TEACHER_PROBS_DIR, NETWORK_MAP
+    extract_node_features,
+    K_RATIO, TEACHER_PROBS_DIR,
 )
+# We will use FNPGNNv8_E13 from the new training script
+from train_hierarchical_gnn_e13_gsl import FNPGNNv8_E13, GraphLearner
+
+@dataclass
+class ModalityInput:
+    matrix_path: Optional[str]        # fMRI FC matrix .npy
+    t1_path:     Optional[str]        # sMRI T1 .nii.gz (auto-found or explicit)
+    subject_id:  str
+
+@dataclass
+class WorkerEvidence:
+    modality:       str            # "fmri" or "smri"
+    task:           str            # "NC_vs_AD" etc.
+    prob_positive:  float          # P(positive class)
+    prediction:     int            # 0 or 1 after threshold
+    confidence:     str            # "high" / "medium" / "low"
+    findings:       dict           # modality-specific evidence for RAG
 
 # ── sMRI ResNet 架構（與 train_3d_resnet_teacher.py 的 build_model 完全一致）──
 class _SEBlock3D(torch.nn.Module):
@@ -63,44 +77,124 @@ def _build_smri_model():
     )
     return model
 
+SALIENCY_DIR = "/home/wei-chi/Data/script/results/saliency"
+
+
+def compute_gradcam(model: torch.nn.Module, t1_tensor: torch.Tensor,
+                    device: torch.device, target_class: int = 1) -> np.ndarray:
+    """
+    對 sMRI ResNet 計算 Grad-CAM 熱力圖。
+    target_class=1 對應正類別（AD/MCI）。
+    回傳 shape (96,96,96) 的 numpy array，值域 [0,1]。
+    """
+    activations: dict = {}
+    gradients: dict = {}
+
+    def _fwd_hook(module, inp, out):
+        activations["feat"] = out
+
+    def _bwd_hook(module, grad_in, grad_out):
+        gradients["feat"] = grad_out[0]
+
+    fwd_handle = model.layer4.register_forward_hook(_fwd_hook)
+    bwd_handle = model.layer4.register_full_backward_hook(_bwd_hook)
+
+    try:
+        t = t1_tensor.to(device)
+        model.zero_grad()
+        logits = model(t)
+        logits[0, target_class].backward()
+
+        act  = activations["feat"].detach()                     # (1,C,d,h,w)
+        grad = gradients["feat"].detach()                       # (1,C,d,h,w)
+        weights = grad.mean(dim=(2, 3, 4), keepdim=True)        # (1,C,1,1,1)
+        cam = torch.relu((weights * act).sum(dim=1, keepdim=True))  # (1,1,d,h,w)
+
+        cam = F.interpolate(cam, size=(96, 96, 96),
+                            mode="trilinear", align_corners=False)
+        cam = cam[0, 0].cpu().numpy()
+
+        lo, hi = cam.min(), cam.max()
+        cam = (cam - lo) / (hi - lo + 1e-8)
+        return cam
+    finally:
+        fwd_handle.remove()
+        bwd_handle.remove()
+
+
+def save_saliency_nifti(cam: np.ndarray, subject_id: str, task: str) -> str:
+    """將 Grad-CAM 陣列儲存為 NIfTI，回傳檔案路徑。"""
+    os.makedirs(SALIENCY_DIR, exist_ok=True)
+    # 2 mm 等向性仿射矩陣（與 96^3 尺寸對應）
+    affine = np.diag([2.0, 2.0, 2.0, 1.0])
+    img = nib.Nifti1Image(cam.astype(np.float32), affine)
+    fname = f"{subject_id}_{task}_gradcam.nii.gz"
+    out_path = os.path.join(SALIENCY_DIR, fname)
+    nib.save(img, out_path)
+    return out_path
+
+
 # ── 路徑設定 ─────────────────────────────────────────────────────────
 CKPT_DIR      = os.path.join(TEACHER_PROBS_DIR, "gnn_checkpoints")
 SMRI_CKPT_DIR = TEACHER_PROBS_DIR   # smri_resnet_v3_{task}_best.pth 放在這裡
-SMRI_ROOT     = "/home/wei-chi/Data/ADNI_sMRI_Aligned_MNI"  # T1 根目錄
+SMRI_ROOT     = "/home/wei-chi/Data/ADNI_sMRI_Aligned_MNI"  # ADNI T1 根目錄
+TPMIC_SMRI_ROOT = "/home/wei-chi/Model/sMRI_data_MultiModal_Aligned_MNI" # TPMIC T1 根目錄
 TASKS         = [("NC", "AD"), ("NC", "MCI"), ("MCI", "AD")]
 SEEDS         = [42, 123, 456]
 
-# ── T1 自動查找：啟動時掃描所有 NIfTI，建立 ADNI_ID → 路徑的 lookup ──
+INFERENCE_THRESHOLDS = {
+    "fmri": {"NC_vs_AD": 0.522, "NC_vs_MCI": 0.398, "MCI_vs_AD": 0.232},
+    "smri": {"NC_vs_AD": 0.500, "NC_vs_MCI": 0.500, "MCI_vs_AD": 0.500},
+}
+
+# ── T1 自動查找：啟動時掃描所有 NIfTI，建立 ID → 路徑的 lookup ──
 import re as _re, glob as _glob
 
-def _build_t1_lookup(smri_root: str) -> dict:
+def _build_t1_lookup(adni_root: str, tpmic_root: str) -> dict:
     lookup = {}
-    for path in _glob.glob(os.path.join(smri_root, "**", "*_T1_MNI.nii.gz"), recursive=True):
-        fname = os.path.basename(path)                  # e.g. 011_S_6303_T1_MNI.nii.gz
-        m = _re.match(r"(\d+_S_\d+)_T1_MNI\.nii\.gz", fname)
-        if m:
-            lookup[m.group(1)] = path                   # key = "011_S_6303"
+    # ADNI scan
+    if os.path.isdir(adni_root):
+        for path in _glob.glob(os.path.join(adni_root, "**", "*_T1_MNI.nii.gz"), recursive=True):
+            fname = os.path.basename(path)
+            m = _re.match(r"(\d+_S_\d+)_T1_MNI\.nii\.gz", fname)
+            if m:
+                lookup[m.group(1)] = path
+    # TPMIC scan (sub_XXXX_T1.nii.gz)
+    if os.path.isdir(tpmic_root):
+        for path in _glob.glob(os.path.join(tpmic_root, "**", "sub_*_T1.nii.gz"), recursive=True):
+            fname = os.path.basename(path)
+            m = _re.match(r"(sub_\d+)_T1\.nii\.gz", fname)
+            if m:
+                lookup[m.group(1)] = path
     return lookup
 
-T1_LOOKUP: dict = _build_t1_lookup(SMRI_ROOT) if os.path.isdir(SMRI_ROOT) else {}
+T1_LOOKUP: dict = _build_t1_lookup(SMRI_ROOT, TPMIC_SMRI_ROOT)
 if T1_LOOKUP:
     print(f"[init] T1 lookup 建立完成，共 {len(T1_LOOKUP)} 筆 sMRI 影像。")
 
 
 def find_t1_path(subject_id: str) -> str | None:
     """
-    從 subject_id 中抽取 ADNI ID（格式 NNN_S_XXXX），
-    到 T1_LOOKUP 中尋找對應的 T1 NIfTI 路徑。
-    找不到時回傳 None（不報錯，退回單模態）。
+    從 subject_id 中抽取 ID，到 T1_LOOKUP 中尋找對應的 T1 NIfTI 路徑。
+    支持 ADNI (NNN_S_XXXX) 與 TPMIC (sub_XXXX) 格式。
     """
-    m = _re.search(r"(\d{3}_S_\d{4})", subject_id)
-    if not m:
-        return None
-    adni_id = m.group(1)
-    return T1_LOOKUP.get(adni_id, None)
+    # Try ADNI format
+    m_adni = _re.search(r"(\d{3}_S_\d{4})", subject_id)
+    if m_adni:
+        return T1_LOOKUP.get(m_adni.group(1), None)
+    
+    # Try TPMIC format
+    m_tpmic = _re.search(r"(sub_\d+)", subject_id)
+    if m_tpmic:
+        return T1_LOOKUP.get(m_tpmic.group(1), None)
+    
+    return None
+
+# ── Patient-Centric GraphRAG ─────────────────────────────────────────
+from graph_rag_retriever import get_patient_graph_context, retrieve_medical_literature, retrieve_multimodal
 
 # ── Neo4j ────────────────────────────────────────────────────────────
-NEO4J_URI      = os.getenv("NEO4J_URI",      "bolt://192.168.51.183:7687")
+NEO4J_URI      = os.getenv("NEO4J_URI",      "bolt://localhost:7687")
 NEO4J_USER     = os.getenv("NEO4J_USER",     "neo4j")
 NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD")
 
@@ -153,7 +247,22 @@ AAL116_NAMES = [
 # ═══════════════════════════════════════════════════════════════════
 def preprocess_matrix(matrix_path: str):
     adj_raw = np.load(matrix_path)
-    assert adj_raw.shape == (116, 116), f"Expected (116,116), got {adj_raw.shape}"
+    if adj_raw.ndim == 3:
+        adj_raw = adj_raw[0]
+
+    n = adj_raw.shape[0]
+    if n != 116:
+        if n < 116:
+            # 零填補至 116×116，保留已有的 ROI 連結資訊
+            padded = np.zeros((116, 116), dtype=adj_raw.dtype)
+            padded[:n, :n] = adj_raw
+            print(f"  ⚠️  矩陣維度 {n}×{n}，已零填補至 116×116")
+            adj_raw = padded
+        else:
+            raise ValueError(f"矩陣維度 {n}×{n} 超過 116，無法處理")
+
+    if np.count_nonzero(adj_raw) == 0:
+        raise ValueError("fMRI 矩陣為全零，影像資料可能已損壞或未正確處理。")
 
     adj_z = np.arctanh(np.clip(adj_raw, -0.999, 0.999))
     x_feat = extract_node_features(adj_z)
@@ -198,65 +307,107 @@ def preprocess_t1(t1_path: str) -> torch.Tensor:
     return data["image"].unsqueeze(0)   # (1, 1, 96, 96, 96)
 
 
+# ── 模態特有常數 ──────────────────────────────────────────────────
+# AAL116 NETWORK_MAP from train_hierarchical_gnn_e13_gsl.py
+E13_NETWORK_MAP = {
+    'DMN': [34, 35, 66, 67, 64, 65, 22, 23, 24, 25],
+    'SMN': [0, 1, 56, 57, 68, 69],
+    'VIS': [42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53],
+    'VAN': [28, 29, 30, 31, 32, 33],
+    'FPN': [6, 7, 58, 59, 60, 61],
+    'LIM': [36, 37, 38, 39, 40, 41],
+    'DAN': [10, 11, 14, 15],
+    'SUB': [70, 71, 72, 73, 74, 75, 76, 77],
+    'CER': list(range(90, 116)),
+}
+
 # ═══════════════════════════════════════════════════════════════════
-# 2a. fMRI 推論（GNN + teacher ensemble）
+# 2a. fMRI Worker
 # ═══════════════════════════════════════════════════════════════════
-def infer_fmri_task(x, adj, task_pair, device, subject_id):
+def infer_fmri_task(x: torch.Tensor, adj: torch.Tensor, task_pair: tuple, device: torch.device) -> Optional[WorkerEvidence]:
     class_a, class_b = task_pair
     safe = f"{class_a}_vs_{class_b}"
     x, adj = x.to(device), adj.to(device)
 
     all_probs, all_saliency = [], []
+    task_idx = 0 if safe == "NC_vs_AD" else 1 if safe == "NC_vs_MCI" else 2
+    
     for seed in SEEDS:
-        ckpt = os.path.join(CKPT_DIR, f"gnn_{safe}_seed{seed}.pt")
+        # E13 is multi-task, we use the unified checkpoint
+        ckpt = os.path.join(CKPT_DIR, f"gnn_e13_seed{seed}.pt")
         if not os.path.exists(ckpt):
             continue
-        model = FNPGNNv8_KD().to(device)
-        model.load_state_dict(torch.load(ckpt, map_location=device))
+        model = FNPGNNv8_E13().to(device)
+        try:
+            model.load_state_dict(torch.load(ckpt, map_location=device))
+        except Exception as e:
+            print(f"  [fMRI] ⚠️  載入權重失敗 ({ckpt}): {e}")
+            continue
         model.eval()
 
-        # 🌟 核心修改 1：開啟梯度追蹤
         x.requires_grad_(True)
+        # E13 returns (logits_list, progression, flat)
+        outputs = model(x, adj)
+        logits_list = outputs[:3]
+        logits = logits_list[task_idx]
         
-        logits, _, _ = model(x, adj, return_attn=True)
-        prob = F.softmax(logits, dim=1).detach().cpu().numpy()[0]   # (2,)
-
-        # 🌟 核心修改 2：計算對目標類別 (class_b, 也就是 Index 1) 的梯度
-        target_score = logits[0, 1] # 疾病的機率分數
+        prob = F.softmax(logits, dim=1).detach().cpu().numpy()[0]
+        
+        target_score = logits[0, 1]
         model.zero_grad()
-        target_score.backward() # 反向傳播計算梯度
-
-        # 🌟 核心修改 3：取輸入特徵梯度的絕對值總和，這就是該腦區對預測的「貢獻度」
-        # shape: (116, feature_dim) -> sum -> (116,)
-        saliency = x.grad[0].abs().sum(dim=-1).detach().cpu().numpy() 
+        target_score.backward()
         
+        saliency = x.grad[0].abs().sum(dim=-1).detach().cpu().numpy()
         all_probs.append(prob)
         all_saliency.append(saliency)
-        
-        # 重置梯度
         x.grad = None
 
     if not all_probs:
-        return None, None, None
+        print(f"  [fMRI] ⚠️  找不到 {safe} 的有效權重")
+        return None
 
     avg_prob = np.mean(all_probs, axis=0)
-    avg_saliency = np.mean(all_saliency, axis=0) # 現在我們用 Saliency 取代 Attention
+    avg_saliency = np.mean(all_saliency, axis=0)
+    prob_positive = float(avg_prob[1])
 
     top_k = 10
     top_idx = np.argsort(avg_saliency)[-top_k:][::-1]
     
-    # 這裡回傳的 avg_saliency 將會讓前端雷達圖出現截然不同的形狀！
-    return float(avg_prob[1]), top_idx.tolist(), avg_saliency
+    # Calculate network weights based on saliency
+    net_weights = {}
+    for net_name, indices in E13_NETWORK_MAP.items():
+        net_weights[net_name] = float(np.mean(avg_saliency[indices]))
+    
+    top_network = max(net_weights, key=net_weights.get)
+    top_region = AAL116_NAMES[top_idx[0]]
+    
+    findings = {
+        "modality": "fMRI functional connectivity",
+        "top_regions": [{"name": AAL116_NAMES[i], "saliency": float(avg_saliency[i])} for i in top_idx],
+        "network_weights": net_weights,
+        "saliency_116": avg_saliency.tolist(),
+        "summary": f"Functional connectivity analysis identified abnormal patterns in {top_network}. The {top_region} showed highest saliency."
+    }
+    
+    threshold = INFERENCE_THRESHOLDS["fmri"].get(safe, 0.5)
+    prediction = 1 if prob_positive >= threshold else 0
+    confidence = "high" if abs(prob_positive - threshold) > 0.2 else "medium" if abs(prob_positive - threshold) > 0.1 else "low"
+
+    return WorkerEvidence(
+        modality="fmri",
+        task=safe,
+        prob_positive=prob_positive,
+        prediction=prediction,
+        confidence=confidence,
+        findings=findings
+    )
 
 
 # ═══════════════════════════════════════════════════════════════════
-# 2b. sMRI 推論（3D ResNet）
+# 2b. sMRI Worker
 # ═══════════════════════════════════════════════════════════════════
-def infer_smri_task(t1_tensor: torch.Tensor, task_pair: tuple, device) -> float:
-    """
-    MONAI resnet50 推論，回傳 P(class_b)。
-    checkpoint 的 class_map = {class_a:0, class_b:1}，與 GNN 一致，不需 flip。
-    """
+def infer_smri_task(t1_tensor: torch.Tensor, task_pair: tuple, device: torch.device,
+                    subject_id: str = "unknown") -> Optional[WorkerEvidence]:
     class_a, class_b = task_pair
     safe = f"{class_a}_vs_{class_b}"
 
@@ -266,17 +417,48 @@ def infer_smri_task(t1_tensor: torch.Tensor, task_pair: tuple, device) -> float:
         return None
 
     model = _build_smri_model().to(device)
-    ckpt = torch.load(ckpt_path, map_location=device)
-    model.load_state_dict(ckpt["model_state_dict"])
+    try:
+        ckpt = torch.load(ckpt_path, map_location=device)
+        model.load_state_dict(ckpt["model_state_dict"])
+    except Exception as e:
+        print(f"      [sMRI] ⚠️  載入權重失敗: {e}")
+        return None
     model.eval()
 
-    with torch.no_grad():
-        logits = model(t1_tensor.to(device))
-        prob = F.softmax(logits, dim=1).cpu().numpy()[0]  # [P(class_a), P(class_b)]
+    # 前向推論（需啟用梯度以計算 Grad-CAM）
+    t1 = t1_tensor.to(device)
+    with torch.enable_grad():
+        logits = model(t1)
+        prob = F.softmax(logits, dim=1).detach().cpu().numpy()[0]
 
-    prob_class_b = float(prob[1])
-    print(f"      [sMRI] P({class_b}) = {prob_class_b*100:.1f}%")
-    return prob_class_b
+    prob_positive = float(prob[1])
+
+    # 計算 Grad-CAM（對正類別，即 AD/MCI）
+    saliency_path = None
+    try:
+        cam = compute_gradcam(model, t1_tensor, device, target_class=1)
+        saliency_path = save_saliency_nifti(cam, subject_id, safe)
+    except Exception as e:
+        print(f"      [sMRI] ⚠️  Grad-CAM 計算失敗：{e}")
+
+    threshold = INFERENCE_THRESHOLDS["smri"].get(safe, 0.5)
+    findings = {
+        "modality": "sMRI structural MRI",
+        "saliency_path": saliency_path,
+        "summary": f"Structural MRI analysis for {safe} task indicates a pattern more consistent with {class_b if prob_positive > threshold else class_a} (probability: {prob_positive:.3f})."
+    }
+
+    prediction = 1 if prob_positive >= threshold else 0
+    confidence = "high" if abs(prob_positive - threshold) > 0.2 else "medium" if abs(prob_positive - threshold) > 0.1 else "low"
+
+    return WorkerEvidence(
+        modality="smri",
+        task=safe,
+        prob_positive=prob_positive,
+        prediction=prediction,
+        confidence=confidence,
+        findings=findings
+    )
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -334,90 +516,102 @@ def query_knowledge_graph(top_roi_names: list, task_pair: tuple) -> dict:
 # 4. 雙模態報告生成（本地端 Ollama / Gemma 4）
 # ═══════════════════════════════════════════════════════════════════
 def init_ollama():
-    model_name = "gemma4:26b"
+    model_name = "gemma3:12b"
     print(f"  本地端私有模型: {model_name}")
     return model_name
 
 
-def generate_report(subject_id: str, task_results: dict, kg_context: dict, model_name: str) -> str:
-    # ── fMRI 分類摘要 ────────────────────────────────────────────────
-    fmri_lines, smri_lines, fused_lines = [], [], []
-    for task_str, res in task_results.items():
-        if res["prob_fused"] is None:
-            continue
-        p_fmri  = res["prob_fmri"]
-        p_smri  = res["prob_smri"]
-        p_fused = res["prob_fused"]
-        cb      = res["class_b"]
+def generate_report(subject_id: str, task_results: dict, kg_context: dict, model_name: str,
+                    patient_context: str = "") -> str:
+    
+    # Extract fMRI and sMRI findings from task_results (using the first available task's findings)
+    first_task = list(task_results.values())[0]
+    fmri_findings = first_task.get("fmri_findings")
+    smri_findings = first_task.get("smri_findings")
 
-        def risk(p):
-            if p is None: return "N/A"
-            return f"{p*100:.1f}% ({'HIGH' if p > 0.6 else 'MODERATE' if p > 0.4 else 'LOW'})"
+    # Use multi-modal retrieval
+    literature_ctx = retrieve_multimodal(fmri_findings, smri_findings, patient_context)
 
-        fmri_lines.append(f"- {task_str}: P({cb}) = {risk(p_fmri)}")
-        smri_lines.append(f"- {task_str}: P({cb}) = {risk(p_smri)}")
-        fused_lines.append(f"- {task_str}: P({cb}) = {risk(p_fused)}")
+    print("\n" + "="*40 + " [Debug: Multi-modal RAG Context] " + "="*40)
+    print(literature_ctx)
+    print("="*110 + "\n")
+    
+    # ── 模態分析摘要 ────────────────────────────────────────────────
+    fmri_summary = ""
+    smri_summary = ""
+    concordance_lines = []
 
-    # ── Top ROI 摘要 ─────────────────────────────────────────────────
-    roi_lines = []
-    for detail in kg_context.get("roi_details", [])[:8]:
-        sign = "↑disease" if (detail.get("attn_diff") or 0) > 0 else "↑control"
-        roi_lines.append(
-            f"  • {detail['roi']} [{detail.get('network','?')}] "
-            f"({sign}, relevance={detail.get('ad_relevance','?')})\n"
-            f"    → {detail.get('function','')}"
-        )
+    for task_name, res in task_results.items():
+        task_label = task_name.replace("_vs_", " vs ")
+        f_findings = res["fmri_findings"]
+        s_findings = res["smri_findings"]
+        
+        if f_findings:
+            fmri_summary += f"- {task_label}: {f_findings.get('summary', '')}\n"
+        
+        if s_findings:
+            smri_summary += f"- {task_label}: {s_findings.get('summary', '')}\n"
 
-    # ── 網路層級摘要 ─────────────────────────────────────────────────
-    net_lines = []
-    task_keys = list(task_results.keys())
-    for net in kg_context.get("network_summary", []):
-        bar = "█" * int(abs(net["diff"] or 0) * 10)
-        ref_task = task_keys[0] if task_keys else "NC vs AD"
-        parts = ref_task.split(" vs ")
-        direction = f"↑{parts[1]}" if (net["diff"] or 0) > 0 else f"↑{parts[0]}"
-        net_lines.append(f"  {net['network']:6s} {direction}: {bar} ({net['diff']:+.2f})")
+        # Check concordance
+        f_pred = res.get("fmri_pred")
+        s_pred = res.get("smri_pred")
+        if f_pred is not None and s_pred is not None:
+            if f_pred == s_pred:
+                concordance_lines.append(f"  • {task_label}：結構與功能預測一致。")
+            else:
+                concordance_lines.append(f"  • {task_label}：⚠️ 分歧（fMRI={f_pred}, sMRI={s_pred}）。")
 
-    has_smri = any(r["prob_smri"] is not None for r in task_results.values())
-    modality_note = "雙模態融合 (fMRI-GNN + sMRI-ResNet)" if has_smri else "單模態 (fMRI-GNN only，sMRI 未提供)"
+    concordance_report = "\n".join(concordance_lines) if concordance_lines else "（單模態分析，無一致性比對數據）"
 
-    prompt = f"""You are a clinical neuroimaging AI assistant specializing in dementia diagnosis.
-Analyze the multimodal brain imaging results for subject: {subject_id}
-Analysis mode: {modality_note}
+    prompt = f"""你是一位專精於失智症神經影像診斷的臨床 AI 助理。
+請根據以下多模態影像分析結果與病患背景脈絡，撰寫一份正式的繁體中文臨床神經影像報告。
 
-## [模態一] 功能性影像 fMRI — GNN 分類結果
-{chr(10).join(fmri_lines) if fmri_lines else "（未取得）"}
+病患代碼：{subject_id}
 
-## [模態二] 結構性影像 sMRI — 3D ResNet 分類結果
-{chr(10).join(smri_lines) if smri_lines else "（未提供 T1 影像，此欄位為 N/A）"}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+【背景脈絡】
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+{patient_context}
 
-## [融合決策] 雙模態加權平均 (fMRI×{FMRI_WEIGHT} + sMRI×{SMRI_WEIGHT})
-{chr(10).join(fused_lines) if fused_lines else "（同 fMRI 結果）"}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+【參考醫學文獻】
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+{literature_ctx}
 
-## Top Salient Brain Regions (GAT Attention, fMRI)
-{chr(10).join(roi_lines)}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+【影像分析數據】
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[功能性影像 fMRI 發現]
+{fmri_summary if fmri_summary else "（未取得有效 fMRI 數據）"}
 
-## Network-level Attention Difference
-{chr(10).join(net_lines)}
+[結構性影像 sMRI 發現]
+{smri_summary if smri_summary else "（未提供 T1 影像）"}
 
-## Task
-Based on the above multimodal results, generate a concise clinical neuroimaging report:
+[模態一致性分析]
+{concordance_report}
 
-1. **整體評估 (Overall Assessment)**：綜合雙模態融合機率，判斷最可能的疾病階段。
-2. **關鍵發現 (Key Findings)**：
-   - 結構性發現 (sMRI)：描述 ResNet 推斷的大腦結構性改變，重點提及海馬迴、皮質萎縮等。
-   - 功能性發現 (fMRI)：描述 GNN/GAT 偵測到的功能性連結異常腦區與網路。
-3. **雙模態整合解釋 (Integrative Interpretation)**：
-   - 討論結構萎縮 (sMRI) 與功能性網路代償/衰退 (fMRI) 之間的關聯。
-   - 特別指出：若 fMRI 偵測到小腦或 VAN 的代償性活化，但 sMRI 同時顯示海馬萎縮，
-     這往往代表患者正處於 AD 初期的功能重塑階段，而非真正的 MCI。
-4. **信心水準與限制 (Confidence & Limitations)**：提及模型準確率並給出保守聲明。
-5. **後續建議 (Recommended Follow-up)**：建議下一步診斷步驟。
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+【報告撰寫指示】
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+請依以下結構撰寫報告，字數控制在 800 字以內，每個段落標題必須以【】標示：
 
-請務必以「繁體中文 (Traditional Chinese)」撰寫正式臨床報告，字數控制在 600 字以內。
+**【背景脈絡】**
+整合病患年齡、性別、教育年限對認知儲備的影響，說明其如何影響影像解讀。
+
+**【影像分析洞察】**
+- **結構性發現 (sMRI)**：詳細描述結構影像顯示的腦區變化（如萎縮情形）。
+- **功能性發現 (fMRI)**：詳細描述功能連接異常模式（如網絡連接強度變化）。
+- **模態一致性分析**：比較結構與功能發現，討論其臨床意義。
+  - 若一致，註明：「結構與功能成像結果一致。」
+  - 若不一致，說明可能的原因（如功能代償或結構領先功能）。
+
+**【臨床診斷建議】**
+- 綜合多模態證據給出診斷判斷。
+- ⚠️ 【強制要求】：你必須運用上方【參考醫學文獻】中的內容來支持你的診斷建議，並在引用該句的句尾明確標註出處（例如：「[fMRI 相關文獻 1]」）。
+
+請務必以「繁體中文（Traditional Chinese）」撰寫，格式清晰。
 """
-
-    print(f"  正在將雙模態特徵送入本地端 {model_name} 進行推理...")
+    print(f"  正在呼叫本地端 {model_name} 生成多模態報告...")
     try:
         response = requests.post(
             "http://localhost:11434/api/generate",
@@ -426,15 +620,99 @@ Based on the above multimodal results, generate a concise clinical neuroimaging 
         response.raise_for_status()
         return response.json()["response"]
     except Exception as e:
-        return f"[本地端模型生成失敗: {e}]\n\n請確認 Ollama 服務是否在背景運行。"
+        return f"[報告生成失敗: {e}]"
 
 
 # ═══════════════════════════════════════════════════════════════════
-# 5. 主推論流程
+# 5. 主推論流程與 Router
 # ═══════════════════════════════════════════════════════════════════
-def run_inference(matrix_path: str, subject_id: str, t1_path: str = None):
+def run_multimodal_inference(modality_input: ModalityInput, device: torch.device) -> dict:
+    """
+    Router: detect available modalities, decide classification strategy.
+    Synthesizer: merge evidence for RAG.
+    """
+    # ── 前處理 ───────────────────────────────────────────────────────
+    x, adj = None, None
+    if modality_input.matrix_path:
+        try:
+            x, adj = preprocess_matrix(modality_input.matrix_path)
+        except Exception as e:
+            print(f"  [fMRI] ⚠️  前處理失敗：{e}")
+
+    t1_tensor = None
+    if modality_input.t1_path:
+        try:
+            t1_tensor = preprocess_t1(modality_input.t1_path)
+        except Exception as e:
+            print(f"  [sMRI] ⚠️  前處理失敗：{e}")
+
+    results = {}
+    for task_pair in TASKS:
+        class_a, class_b = task_pair
+        task_name = f"{class_a}_vs_{class_b}"
+        
+        # Always run fMRI if available (for RAG richness)
+        fmri_ev = infer_fmri_task(x, adj, task_pair, device) if x is not None else None
+        
+        # Run sMRI if available
+        smri_ev = infer_smri_task(t1_tensor, task_pair, device, modality_input.subject_id) if t1_tensor is not None else None
+
+        if fmri_ev is None and smri_ev is None:
+            continue
+
+        # Classification Strategy: sMRI is primary when available (most accurate)
+        primary_ev = smri_ev if smri_ev else fmri_ev
+        
+        # Build combined evidence for RAG
+        evidence_list = [ev.findings for ev in [fmri_ev, smri_ev] if ev]
+        
+        results[task_name] = {
+            "prediction":    primary_ev.prediction,
+            "prob_positive": primary_ev.prob_positive,
+            "modality_used": primary_ev.modality,
+            "evidence":      evidence_list,
+            "fmri_findings": fmri_ev.findings if fmri_ev else None,
+            "smri_findings": smri_ev.findings if smri_ev else None,
+            "fmri_pred":     fmri_ev.prediction if fmri_ev else None,
+            "smri_pred":     smri_ev.prediction if smri_ev else None,
+            "confidence":    primary_ev.confidence,
+            "class_a":       class_a,
+            "class_b":       class_b
+        }
+    return results
+
+MATRIX_ROOTS = [
+    "/home/wei-chi/Model/processed_116_matrices",
+    "/home/wei-chi/Data/ADNI_processed_116_matrices"
+]
+
+def find_matrix_path(subject_id: str) -> str | None:
+    """
+    從 subject_id 自動尋找對應的 .npy 矩陣路徑。
+    """
+    for root in MATRIX_ROOTS:
+        if not os.path.isdir(root):
+            continue
+        # 搜尋包含 subject_id 的 .npy 檔案
+        pattern = os.path.join(root, f"*{subject_id}*.npy")
+        matches = _glob.glob(pattern)
+        if matches:
+            return matches[0]
+    return None
+
+def run_inference(matrix_path: str = None, subject_id: str = "unknown", t1_path: str = None):
     # 強制 CPU，避免與背景 Ollama 搶 VRAM
     device = torch.device("cpu")
+
+    # 若未提供 matrix_path，嘗試從 subject_id 自動查找
+    if not matrix_path or not os.path.exists(matrix_path):
+        auto_matrix = find_matrix_path(subject_id)
+        if auto_matrix:
+            print(f"  [auto] fMRI 矩陣自動配對成功：{auto_matrix}")
+            matrix_path = auto_matrix
+        else:
+            print(f"  ❌ 錯誤：找不到 ID 為 {subject_id} 的 fMRI 矩陣。")
+            return
 
     # 若未手動指定 T1，嘗試從 subject_id 自動查找
     if t1_path is None:
@@ -449,82 +727,41 @@ def run_inference(matrix_path: str, subject_id: str, t1_path: str = None):
     print(f"  Device  : {device}")
     print(f"{'='*62}")
 
-    # ── 前處理 ───────────────────────────────────────────────────────
-    print("\n[1/4] 前處理影像...")
-    x, adj = preprocess_matrix(matrix_path)
-
-    t1_tensor = None
-    if t1_path:
-        try:
-            t1_tensor = preprocess_t1(t1_path)
-            print(f"  sMRI tensor shape: {t1_tensor.shape}")
-        except Exception as e:
-            print(f"  ⚠️  sMRI 前處理失敗：{e}  → 退回單模態模式")
-            t1_tensor = None
-
-    # ── 雙流推論 ────────────────────────────────────────────────────
-    print("\n[2/4] GNN + ResNet 推論（3 tasks）...")
-    task_results = {}
-    all_top_rois = set()
-
-    for task_pair in TASKS:
-        class_a, class_b = task_pair
-        task_str = f"{class_a} vs {class_b}"
-        safe = f"{class_a}_vs_{class_b}"
-        print(f"  [{task_str}]")
-
-        # fMRI 推論
-        prob_fmri, top_idx, attn = infer_fmri_task(x, adj, task_pair, device, subject_id)
-
-        # sMRI 推論（若有 T1）
-        prob_smri = None
-        if t1_tensor is not None:
-            prob_smri = infer_smri_task(t1_tensor, task_pair, device)
-
-        # 決策融合
-        if prob_fmri is not None and prob_smri is not None:
-            prob_fused = FMRI_WEIGHT * prob_fmri + SMRI_WEIGHT * prob_smri
-            modal_tag = "fused"
-        elif prob_fmri is not None:
-            prob_fused = prob_fmri
-            modal_tag = "fMRI-only"
-        else:
-            prob_fused = None
-            modal_tag = "failed"
-
-        if prob_fused is not None and top_idx is not None:
-            top_names = [AAL116_NAMES[i] for i in top_idx]
-            all_top_rois.update(top_names[:5])
-            smri_str = f" | sMRI P({class_b})={prob_smri*100:.1f}%" if prob_smri is not None else ""
-            print(f"      fMRI P({class_b})={prob_fmri*100:.1f}%{smri_str} → Fused={prob_fused*100:.1f}% [{modal_tag}]")
-            print(f"      Top ROI: {top_names[0]}, {top_names[1]}, {top_names[2]}")
-        else:
-            top_names = []
-
-        task_results[task_str] = {
-            "class_a": class_a, "class_b": class_b,
-            "prob_fmri": prob_fmri, "prob_smri": prob_smri, "prob_fused": prob_fused,
-            "top_rois": top_names, "attn": attn,
-        }
-
-    # ── Neo4j 查詢 ──────────────────────────────────────────────────
-    print("\n[3/4] 查詢 Neo4j 知識圖譜...")
-    top_roi_names = list(all_top_rois)[:10]
-    if not top_roi_names:
-        print("  ⚠️  無 checkpoint，請先訓練模型")
+    input_data = ModalityInput(matrix_path=matrix_path, t1_path=t1_path, subject_id=subject_id)
+    
+    print("\n[1/3] 執行多模態推論流程...")
+    task_results = run_multimodal_inference(input_data, device)
+    
+    if not task_results:
+        print("  ⚠️  推論失敗，未取得任何結果。")
         return
 
-    kg_context = query_knowledge_graph(top_roi_names, ("NC", "AD"))
-    if "error" in kg_context:
-        print(f"  ⚠️  Neo4j 查詢失敗：{kg_context['error']}")
+    # Extract all top ROIs for KG query (from fMRI findings)
+    all_top_rois = set()
+    for res in task_results.values():
+        if res["fmri_findings"]:
+            for roi_info in res["fmri_findings"]["top_regions"][:5]:
+                all_top_rois.add(roi_info["name"])
+
+    # ── Neo4j 查詢 ──────────────────────────────────────────────────
+    print("\n[2/3] 查詢 Neo4j 知識圖譜...")
+    top_roi_names = list(all_top_rois)
+    if not top_roi_names:
         kg_context = {"roi_details": [], "network_summary": []}
     else:
-        print(f"  查詢到 {len(kg_context['roi_details'])} 個 ROI，{len(kg_context['network_summary'])} 個網路摘要")
+        kg_context = query_knowledge_graph(top_roi_names, ("NC", "AD"))
+        if "error" in kg_context:
+            print(f"  ⚠️  Neo4j 查詢失敗：{kg_context['error']}")
+            kg_context = {"roi_details": [], "network_summary": []}
+        else:
+            print(f"  查詢到 {len(kg_context['roi_details'])} 個 ROI，{len(kg_context['network_summary'])} 個網路摘要")
 
     # ── 報告生成 ────────────────────────────────────────────────────
-    print("\n[4/4] 生成雙模態臨床報告（Ollama / Gemma 4）...")
+    print("\n[3/3] 生成多模態臨床報告（Ollama / Gemma 4）...")
+    patient_ctx = get_patient_graph_context(subject_id)
     ollama_model = init_ollama()
-    report = generate_report(subject_id, task_results, kg_context, ollama_model)
+    
+    report = generate_report(subject_id, task_results, kg_context, ollama_model, patient_ctx)
 
     print("\n" + "=" * 62)
     print("  CLINICAL REPORT")
@@ -544,13 +781,12 @@ def run_inference(matrix_path: str, subject_id: str, t1_path: str = None):
     print(f"\n  報告已儲存 → {out_path}")
     return report
 
-
 # ═══════════════════════════════════════════════════════════════════
 # 6. CLI 入口
 # ═══════════════════════════════════════════════════════════════════
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Dual-Modal fMRI+sMRI GNN Inference Pipeline")
-    parser.add_argument("--matrix",     required=True,  help="fMRI FC matrix (.npy, 116×116)")
+    parser.add_argument("--matrix",     required=False, help="fMRI FC matrix (.npy, 116×116)")
     parser.add_argument("--subject_id", default="unknown", help="Subject identifier")
     parser.add_argument("--t1_image",   default=None,   help="sMRI T1 影像路徑 (.nii.gz 或 .npy)，選填")
     args = parser.parse_args()
