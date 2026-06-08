@@ -47,6 +47,43 @@ function SaliencyRadarChart({ saliencyData, labels }) {
   );
 }
 
+// ── fMRI 關鍵腦區橫條圖 ──
+const formatROI = (name) => name.replace(/_([LR])$/, ' ($1)').replace(/_/g, ' ');
+
+function FmriRoiBarChart({ topRegions }) {
+  if (!topRegions || topRegions.length === 0) {
+    return (
+      <div className="flex-1 flex flex-col items-center justify-center text-slate-600">
+        <Activity className="w-8 h-8 mb-2 opacity-20" />
+        <span className="text-xs">fMRI 數據無效</span>
+      </div>
+    );
+  }
+  const top8 = topRegions.slice(0, 8);
+  const maxVal = top8[0]?.saliency || 1;
+  return (
+    <div className="space-y-2 py-1">
+      {top8.map((roi, i) => {
+        const pct = Math.round((roi.saliency / maxVal) * 100);
+        return (
+          <div key={i}>
+            <div className="flex justify-between text-xs mb-0.5">
+              <span className="text-slate-300 truncate max-w-[75%]">{formatROI(roi.name)}</span>
+              <span className="text-emerald-400 font-mono">{pct}%</span>
+            </div>
+            <div className="w-full bg-slate-900 rounded-full h-1.5">
+              <div
+                className="h-1.5 rounded-full transition-all duration-500"
+                style={{ width: `${pct}%`, background: 'linear-gradient(to right, #10b981, #34d399)' }}
+              />
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 // ── 9×9 Network Connectivity 熱力圖元件 ──
 function NetworkHeatmap({ matrix, labels }) {
   if (!matrix || !matrix.length || !labels) return null;
@@ -103,30 +140,37 @@ function NiiVueViewer({ t1Url, overlayUrl, showOverlay }) {
   const canvasRef = useRef(null);
   const nvRef = useRef(null);
 
+  // attachToCanvas 只在 mount 時呼叫一次，避免重複 attach 導致 canvas 高度累積
   useEffect(() => {
-    if (!t1Url || !canvasRef.current) return;
-    const nv = new Niivue({
-      backColor: [0.1, 0.1, 0.15, 1],
-      show3Dcrosshair: false,
-    });
-    nvRef.current = nv;
+    if (!canvasRef.current) return;
+    const nv = new Niivue({ backColor: [0.1, 0.1, 0.15, 1], show3Dcrosshair: false, multiplanarLayout: 1 });
     nv.attachToCanvas(canvasRef.current);
+    nvRef.current = nv;
+    return () => { nvRef.current = null; };
+  }, []);
 
-    const volumes = [{ url: t1Url, colorMap: 'gray', opacity: 1 }];
-    if (overlayUrl && showOverlay) {
-      volumes.push({ url: overlayUrl, colorMap: 'redyell', opacity: 0.5 });
+  // t1Url 或 overlayUrl 改變時重新載入 volumes（reuse 同一個 nv 實例）
+  useEffect(() => {
+    const nv = nvRef.current;
+    if (!nv || !t1Url) return;
+    const vols = [{ url: t1Url, colorMap: 'gray', opacity: 1 }];
+    if (overlayUrl) {
+      vols.push({ url: overlayUrl, colorMap: 'inferno', opacity: showOverlay ? 0.7 : 0.0, cal_min: 0.15, cal_max: 1.0 });
     }
-    nv.loadVolumes(volumes).catch(err =>
-      console.error('[NiiVue] 載入影像失敗:', err)
-    );
-    return () => {
-      nvRef.current = null;
-    };
-  }, [t1Url, overlayUrl, showOverlay]);
+    nv.loadVolumes(vols).catch(err => console.error('[NiiVue]', err));
+  }, [t1Url, overlayUrl]);
+
+  // toggle：只改 opacity，完全不碰 canvas 結構
+  useEffect(() => {
+    const nv = nvRef.current;
+    if (!nv || !overlayUrl || !nv.volumes || nv.volumes.length < 2) return;
+    nv.setOpacity(1, showOverlay ? 0.7 : 0.0);
+  }, [showOverlay]);
 
   if (!t1Url) {
     return (
-      <div className="flex flex-col items-center justify-center h-full text-center p-4">
+      <div className="flex flex-col items-center justify-center text-center p-4"
+           style={{ height: '540px' }}>
         <AlertTriangle className="w-10 h-10 text-slate-600 mb-3" />
         <p className="text-slate-500 text-sm leading-relaxed">
           查無結構影像 (sMRI)
@@ -137,8 +181,13 @@ function NiiVueViewer({ t1Url, overlayUrl, showOverlay }) {
     );
   }
 
+  // 固定高度 wrapper + overflow:hidden 確保 Niivue 無法撐大父層
   return (
-    <canvas ref={canvasRef} className="w-full h-full rounded" style={{ minHeight: '180px' }} />
+    <div style={{ height: '540px', overflow: 'hidden', flexShrink: 0 }}>
+      <canvas ref={canvasRef}
+              style={{ width: '100%', height: '100%', display: 'block' }}
+              className="rounded" />
+    </div>
   );
 }
 
@@ -156,6 +205,12 @@ export default function App() {
   const hasSmri = Boolean(currentPatient?.t1_path);
   const hasFmri = Boolean(currentPatient?.fmri_valid);
   const t1Url = currentPatient?.t1_url || '';
+
+  // 依最終預測結果自動選取最具代表性的任務
+  const PRED_TO_TASK = { NC: 'NC_vs_AD', MCI: 'NC_vs_MCI', AD: 'MCI_vs_AD' };
+  const predictedClass = analyzeData?.ovo_result?.predicted_class || null;
+  const activeSaliencyTask = PRED_TO_TASK[predictedClass] || 'NC_vs_AD';
+
   const saliencyUrl = analyzeData?.smri_saliency_url || '';
 
   useEffect(() => {
@@ -165,13 +220,26 @@ export default function App() {
   }, [selectedPatientId]);
 
   useEffect(() => {
-    fetch('http://localhost:8080/api/v1/patients')
-      .then(res => res.json())
-      .then(data => {
-        setPatients(data.patients);
-        if (data.patients.length > 0) setSelectedPatientId(data.patients[0].id);
-      })
-      .catch(err => console.error('無法載入病患清單:', err));
+    let retries = 0;
+    const maxRetries = 5;
+    const load = () => {
+      fetch('/api/v1/patients')
+        .then(res => { if (!res.ok) throw new Error(res.status); return res.json(); })
+        .then(data => {
+          setPatients(data.patients);
+          if (data.patients.length > 0) setSelectedPatientId(data.patients[0].id);
+        })
+        .catch(err => {
+          retries++;
+          if (retries <= maxRetries) {
+            console.warn(`後端連線失敗（${retries}/${maxRetries}），3 秒後重試...`, err);
+            setTimeout(load, 3000);
+          } else {
+            console.error('後端無法連線，請確認 uvicorn api_server 已啟動於 port 8081。');
+          }
+        });
+    };
+    load();
   }, []);
 
   const handleAnalyze = async () => {
@@ -187,7 +255,7 @@ export default function App() {
       formData.append('t1_path', currentPatient.t1_path || '');
       // Removed manual weight, backend handles modality priority automatically
 
-      const response = await fetch('http://localhost:8080/api/v1/analyze', {
+      const response = await fetch('/api/v1/analyze', {
         method: 'POST',
         body: formData,
       });
@@ -206,13 +274,14 @@ export default function App() {
     setReportText('');
 
     try {
-      const response = await fetch('http://localhost:8080/api/v1/report/stream', {
+      const response = await fetch('/api/v1/report/stream', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          subject_id: analyzeData.subject_id,
+          subject_id: selectedPatientId,
           task_results: analyzeData.task_results,
           kg_context: analyzeData.kg_context,
+          ovo_result: analyzeData.ovo_result,
           mode: reportMode,
         }),
       });
@@ -259,11 +328,13 @@ export default function App() {
     }
 
     // 5. 根據結果動態給予警示顏色
-    const colorClass = 
-      finalClass === 'AD' ? 'text-red-400' : 
+    const colorClass =
+      finalClass === 'AD' ? 'text-red-400' :
       finalClass === 'MCI' ? 'text-yellow-400' : 'text-emerald-400';
 
-    return { label: finalClass, color: colorClass };
+    const isBorderline = analyzeData?.ovo_result?.is_borderline ?? false;
+
+    return { label: finalClass, color: colorClass, isBorderline };
   };
 
   return (
@@ -332,9 +403,16 @@ export default function App() {
                   {(() => {
                     const diagnosis = getFinalDiagnosis();
                     return diagnosis ? (
-                      <div className={`text-4xl font-bold tracking-wider flex items-center ${diagnosis.color}`}>
-                        <Activity className="w-8 h-8 mr-3" />
-                        {diagnosis.label}
+                      <div className="flex flex-col gap-2">
+                        <div className={`text-4xl font-bold tracking-wider flex items-center ${diagnosis.color}`}>
+                          <Activity className="w-8 h-8 mr-3" />
+                          {diagnosis.label}
+                        </div>
+                        {diagnosis.isBorderline && (
+                          <div className="flex items-center gap-1.5 text-xs bg-amber-900/50 border border-amber-600 text-amber-300 px-2 py-1 rounded w-fit">
+                            ⚠️ 邊界值預測，建議追蹤觀察
+                          </div>
+                        )}
                       </div>
                     ) : null;
                   })()}
@@ -390,35 +468,44 @@ export default function App() {
               <div className="bg-slate-800 p-6 rounded-xl border border-slate-700 col-span-2 flex flex-col">
                 <h2 className="text-lg font-semibold text-blue-300 mb-4">大腦特徵視覺化 (Brain Viewer)</h2>
                 <div className="flex-1 grid grid-cols-2 gap-4">
-                  <div className="bg-slate-900 rounded-lg border border-slate-700 flex flex-col overflow-hidden" style={{ minHeight: '200px' }}>
+                  <div className="bg-slate-900 rounded-lg border border-slate-700 flex flex-col overflow-hidden">
                     <div className="flex items-center justify-between px-3 pt-3 pb-1">
-                      <div className="text-purple-400 text-xs font-semibold">sMRI 結構萎縮區域</div>
+                      <div className="flex items-center gap-2">
+                        <div className="text-purple-400 text-xs font-semibold">sMRI BrainIAC Attention</div>
+                        {predictedClass && (
+                          <span className={`text-xs px-1.5 py-0.5 rounded font-semibold ${
+                            predictedClass === 'NC'  ? 'bg-emerald-700 text-emerald-200' :
+                            predictedClass === 'MCI' ? 'bg-yellow-700 text-yellow-200' :
+                                                       'bg-red-800 text-red-200'
+                          }`}>
+                            預測：{predictedClass}
+                          </span>
+                        )}
+                      </div>
                       {saliencyUrl && (
-                        <label className="flex items-center gap-1.5 cursor-pointer select-none">
-                          <span className="text-xs text-slate-400">顯示 AI 關注區域</span>
-                          <div
-                            onClick={() => setShowSaliency(v => !v)}
-                            className={`relative w-9 h-5 rounded-full transition-colors duration-200 ${showSaliency ? 'bg-orange-500' : 'bg-slate-600'}`}
-                          >
-                            <div className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform duration-200 ${showSaliency ? 'translate-x-4' : 'translate-x-0'}`} />
-                          </div>
-                        </label>
+                        <div
+                          onClick={() => setShowSaliency(v => !v)}
+                          className={`relative w-9 h-5 rounded-full cursor-pointer transition-colors duration-200 ${showSaliency ? 'bg-orange-500' : 'bg-slate-600'}`}
+                          title="顯示 AI 關注區域"
+                        >
+                          <div className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform duration-200 ${showSaliency ? 'translate-x-4' : 'translate-x-0'}`} />
+                        </div>
                       )}
                     </div>
-                    <div className="flex-1 p-2">
+                    <div className="p-2">
                       <NiiVueViewer t1Url={t1Url} overlayUrl={saliencyUrl} showOverlay={showSaliency} />
                     </div>
                   </div>
-                  <div className="bg-slate-900 rounded-lg border border-slate-700 flex flex-col p-3">
-                    <div className="text-emerald-400 text-xs mb-2 font-semibold">fMRI 功能網路連結強度 (9×9 FC)</div>
-                    {hasFmri ? (
-                      <NetworkHeatmap matrix={analyzeData.network_matrix} labels={analyzeData.network_labels} />
-                    ) : (
-                      <div className="flex-1 flex flex-col items-center justify-center text-slate-600">
-                        <Activity className="w-8 h-8 mb-2 opacity-20" />
-                        <span className="text-xs">fMRI 數據無效，無法生成熱力圖</span>
-                      </div>
-                    )}
+                  <div className="bg-slate-900 rounded-lg border border-slate-700 flex flex-col p-3" style={{ minHeight: '580px' }}>
+                    <div className="flex items-center gap-2 mb-2">
+                      <div className="text-emerald-400 text-xs font-semibold">fMRI 關鍵腦區</div>
+                      {predictedClass && (
+                        <span className="text-slate-400 text-xs">（支持預測 {predictedClass} 的連結模式）</span>
+                      )}
+                    </div>
+                    <FmriRoiBarChart
+                      topRegions={analyzeData.task_results?.[activeSaliencyTask.replace(/_vs_/g, ' vs ')]?.fmri_findings?.top_regions}
+                    />
                   </div>
                 </div>
               </div>

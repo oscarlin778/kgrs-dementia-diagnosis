@@ -190,9 +190,9 @@ def run_task(df_full, task_pair, device):
 # ================= 5. 主程式 =================
 CSV_PATHS = [
     "/home/wei-chi/Model/_dataset_mapping.csv", 
-    "/home/wei-chi/Data/dataset_index_116_clean_old.csv"
+    "/home/wei-chi/Alzheimers_Project/external_data/metadata/dataset_index_116_clean_old.csv"
 ]
-MATRIX_DIR = "/home/wei-chi/Model/processed_116_matrices"
+MATRIX_DIR = "/home/wei-chi/Alzheimers_Project/external_models/processed_116_matrices"
 
 def main():
     print("🚀 啟動 FNP-GNN (拓撲結構強制學習版) ...")

@@ -1,5 +1,7 @@
 import os
 import glob
+import argparse
+import pandas as pd
 import torch
 import torch.nn as nn
 from torch.utils.data import WeightedRandomSampler
@@ -35,11 +37,11 @@ def get_subject_id(path_str):
 # ===============================================================
 # 設定區
 # ===============================================================
-DATA_DIR_TPMIC = "/home/wei-chi/Model/sMRI_data_MultiModal_Aligned_MNI"
-DATA_DIR_ADNI  = "/home/wei-chi/Data/ADNI_sMRI_Aligned_MNI"
+DATA_DIR_TPMIC = "/home/wei-chi/Alzheimers_Project/external_models/sMRI_data_MultiModal_Aligned_MNI"
+DATA_DIR_ADNI  = "/home/wei-chi/Alzheimers_Project/external_data/datasets/ADNI_sMRI_Aligned_MNI"
 
 # ── Checkpoint 儲存目錄（cross-model KD 用）──
-MODEL_SAVE_DIR = "/home/wei-chi/Data/script/checkpoints/resnet_checkpoints"
+MODEL_SAVE_DIR = "/home/wei-chi/Alzheimers_Project/external_data/scripts/checkpoints/resnet_checkpoints"
 os.makedirs(MODEL_SAVE_DIR, exist_ok=True)
 
 # Med3D 預訓練權重路徑 (None = 從頭訓練)
@@ -72,7 +74,7 @@ ROI_SIZE_S2 = (64, 64, 52)       # Stage 2 ROI patch size (更大視野)
 # ===============================================================
 # 1. 資料抓取
 # ===============================================================
-def get_3d_data_dicts(task_pair):
+def get_3d_data_dicts(task_pair, adni_only=False, train_subjects=None):
     """
     抓取指定類別的 T1 影像。
     支援 sMCI/pMCI 分層：
@@ -88,13 +90,26 @@ def get_3d_data_dicts(task_pair):
     is_mci_vs_ad = set(task_pair) == {'MCI', 'AD'}
     data_dicts = []
 
+    allowed_subjects = None
+    if train_subjects:
+        if os.path.exists(train_subjects):
+            df_sub = pd.read_csv(train_subjects)
+            allowed_subjects = set(df_sub['subject_id'].astype(str).tolist())
+            print(f"    Loaded {len(allowed_subjects)} allowed subjects from {train_subjects}")
+
     for label, class_name in enumerate([class_a, class_b]):
         # 來源 1: TPMIC（全部使用）
-        folder_tpmic = os.path.join(DATA_DIR_TPMIC, class_name)
-        if os.path.exists(folder_tpmic):
-            files = list(set(glob.glob(os.path.join(folder_tpmic, "*[Tt]1*.nii.gz"))))
-            for fp in files:
-                data_dicts.append({"image": fp, "label": label})
+        if not adni_only:
+            folder_tpmic = os.path.join(DATA_DIR_TPMIC, class_name)
+            if os.path.exists(folder_tpmic):
+                files = list(set(glob.glob(os.path.join(folder_tpmic, "*[Tt]1*.nii.gz"))))
+                for fp in files:
+                    if allowed_subjects:
+                        # Extract TPMIC subject ID (e.g., sub_0001 from sub_0001_T1.nii.gz)
+                        tpmic_sid = os.path.basename(fp).replace('_T1.nii.gz', '').replace('_t1.nii.gz', '')
+                        if tpmic_sid not in allowed_subjects:
+                            continue
+                    data_dicts.append({"image": fp, "label": label})
 
         # 來源 2: ADNI
         # MCI vs AD task 時，跳過 ADNI MCI（避免 sMCI 稀釋邊界）
@@ -105,6 +120,10 @@ def get_3d_data_dicts(task_pair):
             # 修正後的 glob: 直接抓取目錄下的 .nii.gz
             files = list(set(glob.glob(os.path.join(folder_adni, "*.nii.gz"))))
             for fp in files:
+                if allowed_subjects:
+                    sid = get_subject_id(fp)
+                    if sid not in allowed_subjects:
+                        continue
                 data_dicts.append({"image": fp, "label": label})
 
     return data_dicts
@@ -327,7 +346,7 @@ def train_one_stage(
 # ===============================================================
 # 6. 完整任務（含 Progressive Resizing）
 # ===============================================================
-def run_3d_task(task_pair, device):
+def run_3d_task(task_pair, device, adni_only=False, train_subjects=None):
     task_name = f"{task_pair[0]} vs {task_pair[1]}"
 
     # MCI 相關任務啟用 ROI 模式
@@ -339,15 +358,16 @@ def run_3d_task(task_pair, device):
     print(f"  任務: {task_name}{roi_tag}")
     print(f"{'='*65}")
 
-    data_dicts = get_3d_data_dicts(task_pair)
+    data_dicts = get_3d_data_dicts(task_pair, adni_only=adni_only, train_subjects=train_subjects)
     if len(data_dicts) < 10:
         print("  ❌ 找不到足夠的 T1 影像！")
         return 0, None, None
 
     labels_arr = np.array([d["label"] for d in data_dicts])
     unique, counts = np.unique(labels_arr, return_counts=True)
-    for cls, cnt in zip(task_pair, counts):
-        print(f"  {cls}: {cnt} 筆")
+    for i, cls in enumerate(task_pair):
+        count = counts[i] if i < len(counts) else 0
+        print(f"  {cls}: {count} 筆")
     print(f"  總計: {len(data_dicts)} 筆 | ROI模式: {use_roi}")
 
     skf = StratifiedKFold(n_splits=N_FOLDS, shuffle=True, random_state=SEED)
@@ -520,6 +540,18 @@ def run_3d_task(task_pair, device):
 # 7. 主程式
 # ===============================================================
 def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--adni-only", action="store_true")
+    parser.add_argument("--train-subjects", type=str, default=None)
+    parser.add_argument("--output-dir", type=str, default=None)
+    args = parser.parse_args()
+
+    if args.output_dir:
+        global MODEL_SAVE_DIR
+        MODEL_SAVE_DIR = args.output_dir
+        os.makedirs(MODEL_SAVE_DIR, exist_ok=True)
+        print(f"📂 Output directory set to: {MODEL_SAVE_DIR}")
+
     print("🚀 sMRI 3D ResNet v3")
     print("   改進項目: ROI 聚焦 + Progressive Resizing + SE Block + 強化增強")
     print("   MCI 任務自動啟用海馬迴 ROI 模式\n")
@@ -540,7 +572,7 @@ def main():
     fig.suptitle('3D ResNet v3 (sMRI) — ROI + Progressive Resizing', fontsize=16, fontweight='bold')
 
     for idx, task in enumerate(tasks):
-        acc, auc, cm = run_3d_task(task, device)
+        acc, auc, cm = run_3d_task(task, device, adni_only=args.adni_only, train_subjects=args.train_subjects)
         if cm is not None:
             key = f"{task[0]} vs {task[1]}"
             results[key] = (acc, auc, cm)

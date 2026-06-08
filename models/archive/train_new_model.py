@@ -12,7 +12,7 @@ from sklearn.metrics import confusion_matrix, accuracy_score
 from sklearn.utils.class_weight import compute_class_weight
 
 # ================= 1. 路徑與參數設定 =================
-BASE_DIR = "/home/wei-chi/Data"
+BASE_DIR = "/home/wei-chi/Alzheimers_Project/external_data"
 
 # 【致勝關鍵：只讀取兩份「血統最純正」的乾淨資料】
 CSV_PATHS = [

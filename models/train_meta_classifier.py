@@ -27,9 +27,9 @@ from sklearn.metrics import (
 warnings.filterwarnings("ignore")
 
 # ── 路徑設定 ────────────────────────────────────────────────────────────────
-GNN_DIR    = "/home/wei-chi/Data/script/checkpoints/fnp_gnn_v5_checkpoints"
-RESNET_DIR = "/home/wei-chi/Data/script/checkpoints/resnet_checkpoints"
-OUT_DIR    = "/home/wei-chi/Data/script/checkpoints/meta_checkpoints"
+GNN_DIR    = "/home/wei-chi/Alzheimers_Project/external_data/scripts/checkpoints/fnp_gnn_v5_checkpoints"
+RESNET_DIR = "/home/wei-chi/Alzheimers_Project/external_data/scripts/checkpoints/resnet_checkpoints"
+OUT_DIR    = "/home/wei-chi/Alzheimers_Project/external_data/scripts/checkpoints/meta_checkpoints"
 os.makedirs(OUT_DIR, exist_ok=True)
 
 TASKS = [

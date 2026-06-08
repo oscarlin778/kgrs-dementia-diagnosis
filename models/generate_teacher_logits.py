@@ -11,11 +11,11 @@ import torch.nn as nn
 # ==========================================
 # 1. 檔案路徑與設定
 # ==========================================
-DATA_DIR_TPMIC = "/home/wei-chi/Model/sMRI_data_MultiModal_Aligned_MNI"
-DATA_DIR_ADNI  = "/home/wei-chi/Data/ADNI_sMRI_Aligned_MNI"
-MODEL_SAVE_DIR = "/home/wei-chi/Data/script/resnet_checkpoints"
+DATA_DIR_TPMIC = "/home/wei-chi/Alzheimers_Project/external_models/sMRI_data_MultiModal_Aligned_MNI"
+DATA_DIR_ADNI  = "/home/wei-chi/Alzheimers_Project/external_data/datasets/ADNI_sMRI_Aligned_MNI"
+MODEL_SAVE_DIR = "/home/wei-chi/Alzheimers_Project/external_data/scripts/resnet_checkpoints"
 # 產出的檔案要放的地方 (GNN 訓練時會去這裡讀 teacher logits)
-OUTPUT_DIR     = "/home/wei-chi/Data/script/checkpoints/resnet_checkpoints"
+OUTPUT_DIR     = "/home/wei-chi/Alzheimers_Project/external_data/scripts/checkpoints/resnet_checkpoints"
 
 # ==========================================
 # 2. 萬用 ID 萃取器 (拔除前後綴)

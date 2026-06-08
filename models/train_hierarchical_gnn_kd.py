@@ -15,19 +15,19 @@ import sys
 import warnings
 warnings.filterwarnings('ignore')
 
-sys.path.insert(0, '/home/wei-chi/Data/script')
+sys.path.insert(0, '/home/wei-chi/Alzheimers_Project/external_data/scripts')
 import save_experiment_results as ser
 
 # ===============================================================
 # Settings & Hyperparameters
 # ===============================================================
 CSV_PATHS = [
-    "/home/wei-chi/Model/_dataset_mapping.csv",
-    "/home/wei-chi/Data/dataset_index_116_clean_old.csv",
-    "/home/wei-chi/Data/adni_dataset_index_116.csv"
+    "/home/wei-chi/Alzheimers_Project/external_models/_dataset_mapping.csv",
+    "/home/wei-chi/Alzheimers_Project/external_data/metadata/dataset_index_116_clean_old.csv",
+    "/home/wei-chi/Alzheimers_Project/external_data/metadata/adni_dataset_index_116.csv"
 ]
-MATRIX_DIR = "/home/wei-chi/Model/processed_116_matrices"
-TEACHER_PROBS_DIR = "/home/wei-chi/Data/script/checkpoints/resnet_checkpoints"
+MATRIX_DIR = "/home/wei-chi/Alzheimers_Project/external_models/processed_116_matrices"
+TEACHER_PROBS_DIR = "/home/wei-chi/Alzheimers_Project/external_data/scripts/checkpoints/resnet_checkpoints"
 
 HIDDEN_DIM      = 128
 DROPOUT         = 0.4    # 降回 0.4，給模型多一點學習空間
@@ -339,7 +339,7 @@ def run_task_kd(df_task, task_pair, teacher_dict, device, seed, ckpt_dir=None):
     class_a, class_b = task_pair
     labels_arr = df_task['current_task_label'].values
     strata_arr = (
-        labels_arr.astype(str) + '_' + df_task['source'].fillna('TPMIC').values
+        np.array([f"{l}_{s}" for l, s in zip(labels_arr, df_task['source'].fillna('TPMIC').values)])
     ) if 'source' in df_task.columns else labels_arr
 
     torch.manual_seed(seed)

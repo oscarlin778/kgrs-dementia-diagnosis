@@ -15,19 +15,19 @@ import sys
 import warnings
 warnings.filterwarnings('ignore')
 
-sys.path.insert(0, '/home/wei-chi/Data/script')
+sys.path.insert(0, '/home/wei-chi/Alzheimers_Project/external_data/scripts')
 import save_experiment_results as ser
 
 # ===============================================================
 # Settings & Hyperparameters (same as E3 base)
 # ===============================================================
 CSV_PATHS = [
-    "/home/wei-chi/Model/_dataset_mapping.csv",
-    "/home/wei-chi/Data/dataset_index_116_clean_old.csv",
-    "/home/wei-chi/Data/adni_dataset_index_116.csv"
+    "/home/wei-chi/Alzheimers_Project/external_models/_dataset_mapping.csv",
+    "/home/wei-chi/Alzheimers_Project/external_data/metadata/dataset_index_116_clean_old.csv",
+    "/home/wei-chi/Alzheimers_Project/external_data/metadata/adni_dataset_index_116.csv"
 ]
-MATRIX_DIR = "/home/wei-chi/Model/processed_116_matrices"
-TEACHER_PROBS_DIR = "/home/wei-chi/Data/script/checkpoints/resnet_checkpoints"
+MATRIX_DIR = "/home/wei-chi/Alzheimers_Project/external_models/processed_116_matrices"
+TEACHER_PROBS_DIR = "/home/wei-chi/Alzheimers_Project/external_data/scripts/checkpoints/resnet_checkpoints"
 
 HIDDEN_DIM      = 128
 DROPOUT         = 0.4

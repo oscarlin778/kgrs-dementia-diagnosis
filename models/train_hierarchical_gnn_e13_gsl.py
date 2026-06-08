@@ -3,6 +3,7 @@ import os
 import re
 import json
 import random
+import argparse
 import numpy as np
 import pandas as pd
 import torch
@@ -18,20 +19,20 @@ import sys
 import warnings
 warnings.filterwarnings('ignore')
 
-sys.path.insert(0, '/home/wei-chi/Data/script')
+sys.path.insert(0, '/home/wei-chi/Alzheimers_Project/external_data/scripts')
 import save_experiment_results as ser
 
 # ===============================================================
 # Settings & Hyperparameters
 # ===============================================================
 CSV_PATHS = [
-    "/home/wei-chi/Model/_dataset_mapping.csv",
-    "/home/wei-chi/Data/dataset_index_116_clean_old.csv",
-    "/home/wei-chi/Data/adni_dataset_index_116.csv"
+    "/home/wei-chi/Alzheimers_Project/external_models/_dataset_mapping.csv",
+    "/home/wei-chi/Alzheimers_Project/external_data/metadata/dataset_index_116_clean_old.csv",
+    "/home/wei-chi/Alzheimers_Project/external_data/metadata/adni_dataset_index_116.csv"
 ]
-MATRIX_DIR = "/home/wei-chi/Model/processed_116_matrices"
-TEACHER_PROBS_DIR = "/home/wei-chi/Data/script/checkpoints/resnet_checkpoints"
-UNIFIED_SPLIT_PATH = "/home/wei-chi/Data/script/unified_subject_split.json"
+MATRIX_DIR = "/home/wei-chi/Alzheimers_Project/external_models/processed_116_matrices"
+TEACHER_PROBS_DIR = "/home/wei-chi/Alzheimers_Project/external_data/scripts/checkpoints/resnet_checkpoints"
+UNIFIED_SPLIT_PATH = "/home/wei-chi/Alzheimers_Project/external_data/scripts/unified_subject_split.json"
 
 HIDDEN_DIM      = 128
 DROPOUT         = 0.4
@@ -266,14 +267,21 @@ def get_subject_id(p):
 
 
 class MultiTaskDataset_E13(Dataset):
-    def __init__(self, dataframe, teacher_probs_all=None):
+    def __init__(self, dataframe, teacher_probs_all=None, tpmic_mci_only=False):
         self.data_cache = []
+        self.tpmic_mci_only = tpmic_mci_only
         for _, row in dataframe.iterrows():
             adj_raw = np.load(row['matrix_path']); subj_id = get_subject_id(row['matrix_path'])
-            diag = str(row['diagnosis']).upper(); src = row.get('source', 'TPMIC'); domain_label = 1 if str(src).upper() == 'ADNI' else 0
+            diag = str(row['diagnosis']).upper(); src = row.get('source', 'TPMIC'); domain_label = 0 if str(src).upper() == 'TPMIC' else 1
             labels = {'nc_ad': -1, 'nc_mci': -1, 'mci_ad': -1}
             if diag == 'NC':  labels['nc_ad'] = 0; labels['nc_mci'] = 0; diag_type = 0
-            elif diag == 'MCI': labels['nc_mci'] = 1; labels['mci_ad'] = 0; diag_type = 1
+            elif diag == 'MCI': 
+                # Filter out ADNI MCI if requested for NC_vs_MCI task
+                if self.tpmic_mci_only and str(src).upper() != 'TPMIC':
+                    labels['nc_mci'] = -1
+                else:
+                    labels['nc_mci'] = 1
+                labels['mci_ad'] = 0; diag_type = 1
             elif diag == 'AD':  labels['nc_ad'] = 1; labels['mci_ad'] = 1; diag_type = 2
             else: diag_type = -1
             soft, has_soft = {t: torch.zeros(2) for t in labels}, {t: False for t in labels}
@@ -313,7 +321,7 @@ class BalancedTriClassSampler(Sampler):
 # ===============================================================
 # 4. Training Function
 # ===============================================================
-def run_e13_seed(df_full, teacher_probs_all, device, seed):
+def run_e13_seed(df_full, teacher_probs_all, device, seed, tpmic_mci_only=False):
     torch.manual_seed(seed); np.random.seed(seed)
     with open(UNIFIED_SPLIT_PATH, 'r') as f: unified_split = json.load(f)
     oof_results = {task: [None]*len(df_full) for task in ['nc_ad', 'nc_mci', 'mci_ad']}
@@ -324,8 +332,8 @@ def run_e13_seed(df_full, teacher_probs_all, device, seed):
         val_subjs = set(unified_split[f"fold_{fold}"])
         train_df = df_full[~df_full['matrix_path'].apply(get_subject_id).isin(val_subjs)].reset_index(drop=True)
         val_df   = df_full[df_full['matrix_path'].apply(get_subject_id).isin(val_subjs)].reset_index(drop=True)
-        train_ds = MultiTaskDataset_E13(train_df, teacher_probs_all)
-        val_ds   = MultiTaskDataset_E13(val_df, teacher_probs_all)
+        train_ds = MultiTaskDataset_E13(train_df, teacher_probs_all, tpmic_mci_only=tpmic_mci_only)
+        val_ds   = MultiTaskDataset_E13(val_df, teacher_probs_all, tpmic_mci_only=tpmic_mci_only)
         train_loader = DataLoader(train_ds, batch_size=BATCH_SIZE, sampler=BalancedTriClassSampler(train_ds), drop_last=True)
         val_loader   = DataLoader(val_ds, batch_size=1)
 
@@ -422,17 +430,22 @@ def run_e13_seed(df_full, teacher_probs_all, device, seed):
         # Store OOF predictions from best checkpoint
         model.load_state_dict(best_state); model.eval()
         
-        # [ADD] Save the best model for this seed and fold (or just the seed if you prefer)
-        # For simplicity and to match inference_pipeline, we save the seed's best model (from the last fold or overall best)
-        # Actually, let's save per seed to match the logic: gnn_NC_vs_AD_seed42.pt
-        # But wait, E13 is multi-task. We'll save it as gnn_e13_all_tasks_seed{seed}.pt
-        # And we'll update inference_pipeline to load this single file.
+        # [ADD] Save the best model for this seed and fold
         save_dir = os.path.join(TEACHER_PROBS_DIR, "gnn_checkpoints")
         os.makedirs(save_dir, exist_ok=True)
-        # We save the model from the BEST FOLD of this seed
-        # (In a production setting, you might ensemble folds, but here we just need a working checkpoint)
-        torch.save(best_state, os.path.join(save_dir, f"gnn_e13_seed{seed}.pt"))
+        
+        # Save multi-task checkpoint
+        main_ckpt_path = os.path.join(save_dir, f"gnn_e13_seed{seed}.pt")
+        torch.save(best_state, main_ckpt_path)
         print(f"      ✅ Model saved: gnn_e13_seed{seed}.pt")
+
+        # Save per-task aliases for Task 4 compatibility
+        for task in ["NC_vs_AD", "NC_vs_MCI", "MCI_vs_AD"]:
+            task_ckpt_path = os.path.join(save_dir, f"{task}.pt")
+            # If multi-seed training, this might overwrite with the last seed's model,
+            # which is acceptable if we just need a working checkpoint.
+            torch.save(best_state, task_ckpt_path)
+            # print(f"      Task alias saved: {task}.pt")
 
         val_subj_to_idx = {get_subject_id(p): i for i, p in enumerate(df_full['matrix_path'])}
         with torch.no_grad():
@@ -453,26 +466,57 @@ def run_e13_seed(df_full, teacher_probs_all, device, seed):
 # 5. Main
 # ===============================================================
 def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--train-csv", type=str, default=None)
+    parser.add_argument("--output-dir", type=str, default=None)
+    parser.add_argument("--tpmic-mci-only", action="store_true", help="NC_vs_MCI: filter out non-TPMIC MCI subjects")
+    parser.add_argument("--dry-run", action="store_true")
+    args = parser.parse_args()
+
+    # Update TEACHER_PROBS_DIR if output-dir is provided
+    global TEACHER_PROBS_DIR
+    if args.output_dir:
+        TEACHER_PROBS_DIR = args.output_dir
+        os.makedirs(TEACHER_PROBS_DIR, exist_ok=True)
+
     valid_data, seen = [], set()
-    for path in CSV_PATHS:
-        if not os.path.exists(path): continue
-        df = pd.read_csv(path)
+    if args.train_csv:
+        if not os.path.exists(args.train_csv):
+            print(f"Error: Train CSV not found: {args.train_csv}")
+            return
+        df = pd.read_csv(args.train_csv)
         for _, row in df.iterrows():
-            m_path = (
-                row.get('matrix_path') or
-                (os.path.join(MATRIX_DIR, f"{row['new_id_base']}_matrix_116.npy") if pd.notna(row.get('new_id_base')) else None) or
-                (os.path.join(MATRIX_DIR, f"{row['Subject']}_matrix_116.npy")     if pd.notna(row.get('Subject'))     else None)
-            )
-            if not (m_path and os.path.exists(m_path)) or m_path in seen: continue
-            if np.load(m_path).shape == (116, 116) and str(row.get('diagnosis', '')).upper() in ['NC', 'MCI', 'AD']:
+            m_path = row['matrix_path']
+            if not (m_path and os.path.exists(m_path)): continue
+            if np.load(m_path).shape == (116, 116):
                 valid_data.append({
                     'matrix_path': m_path,
                     'diagnosis':   str(row['diagnosis']).upper(),
-                    'source':      'ADNI' if ('adni' in m_path.lower() or 'old_dswau' in m_path.lower()) else 'TPMIC'
+                    'source':      row.get('source', 'TPMIC')
                 })
-                seen.add(m_path)
+    else:
+        for path in CSV_PATHS:
+            if not os.path.exists(path): continue
+            df = pd.read_csv(path)
+            for _, row in df.iterrows():
+                m_path = (
+                    row.get('matrix_path') or
+                    (os.path.join(MATRIX_DIR, f"{row['new_id_base']}_matrix_116.npy") if pd.notna(row.get('new_id_base')) else None) or
+                    (os.path.join(MATRIX_DIR, f"{row['Subject']}_matrix_116.npy")     if pd.notna(row.get('Subject'))     else None)
+                )
+                if not (m_path and os.path.exists(m_path)) or m_path in seen: continue
+                if np.load(m_path).shape == (116, 116) and str(row.get('diagnosis', '')).upper() in ['NC', 'MCI', 'AD']:
+                    valid_data.append({
+                        'matrix_path': m_path,
+                        'diagnosis':   str(row['diagnosis']).upper(),
+                        'source':      'ADNI' if ('adni' in m_path.lower() or 'old_dswau' in m_path.lower()) else 'TPMIC'
+                    })
+                    seen.add(m_path)
 
     df_full = pd.DataFrame(valid_data)
+    if args.dry_run:
+        print(f"Dry run: Loaded {len(df_full)} subjects.")
+        return
 
     teacher_probs_all = {}
     for task in [('NC', 'AD'), ('NC', 'MCI'), ('MCI', 'AD')]:
@@ -482,13 +526,15 @@ def main():
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"E13 GSL | Large-Margin CE | Uncertainty MTL | Ordinal λ={LAMBDA_ORDINAL} | Device: {device}")
+    if args.tpmic_mci_only:
+        print("  ⚠️ TPMIC-MCI-Only mode: ADNI MCI excluded from NC_vs_MCI task.")
 
     seed_probs = {t: [] for t in ['nc_ad', 'nc_mci', 'mci_ad']}
     final_trues = None
 
     for seed in SEEDS:
         print(f"\n  [Seed {seed}]")
-        res, trues = run_e13_seed(df_full, teacher_probs_all, device, seed)
+        res, trues = run_e13_seed(df_full, teacher_probs_all, device, seed, tpmic_mci_only=args.tpmic_mci_only)
         if final_trues is None: final_trues = trues
         for t in res:
             seed_probs[t].append(np.array([p if p is not None else [0.5, 0.5] for p in res[t]]))
@@ -527,7 +573,7 @@ def main():
         }
         oof_data_out[t] = {"true": t_true, "prob": t_prob}
 
-    out_dir = "/home/wei-chi/Data/script/results/E13_GSL"
+    out_dir = "/home/wei-chi/Alzheimers_Project/external_data/scripts/results/E13_GSL"
     os.makedirs(out_dir, exist_ok=True)
     np.save(os.path.join(out_dir, "oof_predictions.npy"), oof_data_out)
 

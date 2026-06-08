@@ -722,6 +722,72 @@ def build_neo4j_graph():
                 """, roi_name=roi["name"], abbr=net_abbr)
         print(f"  ✅ ROI 節點 + BELONGS_TO 邊  ({len(ROI_KNOWLEDGE)} ROIs)")
 
+        # ── Task 4: Expand KG Schema ───────────────────────────────
+        print("\n🚀 [Task 4] Expanding Knowledge Graph Schema...")
+
+        # 1. Add CognitiveDomain nodes
+        cognitive_domains = [
+            {"name": "Memory", "desc": "Encoding and retrieval of information", "tests": ["RAVLT", "ADAS-Cog Delayed Recall"]},
+            {"name": "ExecutiveFunction", "desc": "Higher-level cognitive processes", "tests": ["Trail Making Test B", "Clock Drawing"]},
+            {"name": "Language", "desc": "Speech production and comprehension", "tests": ["Boston Naming Test", "Category Fluency"]},
+            {"name": "VisuospatialAbility", "desc": "Processing visual and spatial relationships", "tests": ["Rey-Osterrieth Complex Figure"]},
+            {"name": "AttentionProcessingSpeed", "desc": "Ability to sustain attention and speed", "tests": ["Digit Symbol Substitution", "TMT A"]}
+        ]
+        for cd in cognitive_domains:
+            session.run("""
+                MERGE (c:CognitiveDomain {name: $name})
+                SET c.description = $desc,
+                    c.adni_battery_tests = $tests
+            """, name=cd["name"], desc=cd["desc"], tests=cd["tests"])
+        print(f"  ✅ CognitiveDomain 節點  ({len(cognitive_domains)})")
+
+        # 2. Add IMPAIRS edges: BrainNetwork -> CognitiveDomain
+        impairs_edges = [
+            ("DMN", "Memory", 0.9, "default mode network disruption -> episodic memory decline"),
+            ("FPN", "ExecutiveFunction", 0.85, "Frontoparietal control network disruption -> executive dysfunction"),
+            ("LIM", "Memory", 0.8, "Limbic system atrophy/disconnection -> memory impairment"),
+            ("VAN", "AttentionProcessingSpeed", 0.75, "Ventral attention network disruption -> sensory-driven attention decline"),
+            ("DAN", "AttentionProcessingSpeed", 0.70, "Dorsal attention network disruption -> top-down attention decline")
+        ]
+        for abbr, cd_name, weight, evidence in impairs_edges:
+            session.run("""
+                MATCH (n:BrainNetwork {abbr: $abbr})
+                MATCH (c:CognitiveDomain {name: $cd_name})
+                MERGE (n)-[r:IMPAIRS]->(c)
+                SET r.weight = $weight,
+                    r.evidence = $evidence
+            """, abbr=abbr, cd_name=cd_name, weight=weight, evidence=evidence)
+        print(f"  ✅ IMPAIRS 邊")
+
+        # 3. Add PROGRESSES_TO edges between DiseaseStage nodes
+        progress_edges = [
+            ("NC", "MCI", 0.01, "population cohort studies"),
+            ("MCI", "AD", 0.10, "Petersen et al. 2018")
+        ]
+        for start, end, rate, evidence in progress_edges:
+            session.run("""
+                MATCH (s:DiseaseStage {name: $start})
+                MATCH (e:DiseaseStage {name: $end})
+                MERGE (s)-[r:PROGRESSES_TO]->(e)
+                SET r.annual_rate = $rate,
+                    r.evidence = $evidence
+            """, start=start, end=end, rate=rate, evidence=evidence)
+        print(f"  ✅ PROGRESSES_TO 邊")
+
+        # 4. Add biomarker threshold properties to existing Biomarker nodes
+        # Assuming Biomarker nodes might exist or need creation
+        biomarkers = [
+            {"name": "ApoE4", "allele_risk": {"e4e4": "high", "e3e4": "moderate", "e3e3": "low"}},
+            {"name": "Amyloid-PET", "positive_threshold": 1.11, "unit": "SUVR"},
+            {"name": "CSF-Abeta42", "positive_threshold": 192, "unit": "pg/mL"}
+        ]
+        for bm in biomarkers:
+            session.run("""
+                MERGE (b:Biomarker {name: $name})
+                SET b += $props
+            """, name=bm["name"], props={k: v for k, v in bm.items() if k != "name"})
+        print(f"  ✅ Biomarker 閾值更新")
+
     driver.close()
     print("\n  Graph build complete.")
     print("  驗證：在 Neo4j Browser 執行")
@@ -732,7 +798,7 @@ def build_neo4j_graph():
 # Main
 # ═══════════════════════════════════════════════════════════════════
 if __name__ == "__main__":
-    JSON_OUT = "/home/wei-chi/Data/script/results/knowledge_base"
+    JSON_OUT = "/home/wei-chi/Alzheimers_Project/external_data/scripts/results/knowledge_base"
     print("📚 匯出知識庫 JSON...")
     export_to_json(JSON_OUT)
 

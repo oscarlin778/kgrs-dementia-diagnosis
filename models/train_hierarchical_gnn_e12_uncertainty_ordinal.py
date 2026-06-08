@@ -18,20 +18,20 @@ import sys
 import warnings
 warnings.filterwarnings('ignore')
 
-sys.path.insert(0, '/home/wei-chi/Data/script')
+sys.path.insert(0, '/home/wei-chi/Alzheimers_Project/external_data/scripts')
 import save_experiment_results as ser
 
 # ===============================================================
 # Settings & Hyperparameters
 # ===============================================================
 CSV_PATHS = [
-    "/home/wei-chi/Model/_dataset_mapping.csv",
-    "/home/wei-chi/Data/dataset_index_116_clean_old.csv",
-    "/home/wei-chi/Data/adni_dataset_index_116.csv"
+    "/home/wei-chi/Alzheimers_Project/external_models/_dataset_mapping.csv",
+    "/home/wei-chi/Alzheimers_Project/external_data/metadata/dataset_index_116_clean_old.csv",
+    "/home/wei-chi/Alzheimers_Project/external_data/metadata/adni_dataset_index_116.csv"
 ]
-MATRIX_DIR = "/home/wei-chi/Model/processed_116_matrices"
-TEACHER_PROBS_DIR = "/home/wei-chi/Data/script/checkpoints/resnet_checkpoints"
-UNIFIED_SPLIT_PATH = "/home/wei-chi/Data/script/unified_subject_split.json"
+MATRIX_DIR = "/home/wei-chi/Alzheimers_Project/external_models/processed_116_matrices"
+TEACHER_PROBS_DIR = "/home/wei-chi/Alzheimers_Project/external_data/scripts/checkpoints/resnet_checkpoints"
+UNIFIED_SPLIT_PATH = "/home/wei-chi/Alzheimers_Project/external_data/scripts/unified_subject_split.json"
 
 HIDDEN_DIM      = 128
 DROPOUT         = 0.4
@@ -351,7 +351,7 @@ def main():
         oof_data_to_save[t] = {"true": t_true, "prob": t_prob}
 
     # Save results
-    out_dir = "/home/wei-chi/Data/script/results/E12_MTL_Uncertainty_Ordinal"
+    out_dir = "/home/wei-chi/Alzheimers_Project/external_data/scripts/results/E12_MTL_Uncertainty_Ordinal"
     os.makedirs(out_dir, exist_ok=True)
     np.save(os.path.join(out_dir, "oof_predictions.npy"), oof_data_to_save)
     

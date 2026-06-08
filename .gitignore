@@ -55,3 +55,42 @@ downstream/kgrs-frontend/dist/
 nilearn_cache/
 fMRI/nilearn_data/
 .aider*
+
+# ============================================================
+# 新增：病患預測結果 / saliency / split
+# ============================================================
+*.npz
+downstream/results/smri_saliency/
+results/smri_saliency/
+unified_subject_split_trainonly.json
+
+# ============================================================
+# 新增：大型資料目錄（含病患 ID 的前處理結果）
+# ============================================================
+downstream/fmri_combat_v2*/
+fmri_combat_v2*/
+downstream/results/
+datasets/
+fMRI/
+
+# ============================================================
+# 環境與敏感設定
+# ============================================================
+.env*
+downstream/.env*
+
+# ============================================================
+# 衍生模型檔 / ComBat 參數（從訓練資料計算，非原始 code）
+# ============================================================
+*.pkl
+**/combat_params_*.json
+
+# ============================================================
+# 內部開發筆記（非公開內容）
+# ============================================================
+REDO_PROMPT.md
+OVERNIGHT_PLAN.md
+EXECUTION_PLAN.md
+downstream/EXECUTION_PLAN.md
+downstream/OVERNIGHT_PLAN.md
+downstream/docs/
