@@ -2,7 +2,7 @@ import os
 import subprocess
 
 # 設定配對好的資料集路徑
-BASE_DIR = "/home/wei-chi/Data/Matched_Dual_Modal_Dataset"
+BASE_DIR = "/home/wei-chi/Alzheimers_Project/external_data/datasets/Matched_Dual_Modal_Dataset"
 
 def convert_dicom_to_nifti(base_dir):
     # 遍歷 AD, MCI, NC 資料夾

@@ -6,9 +6,9 @@ import pandas as pd
 # ==========================================
 # 1. 路徑參數設定
 # ==========================================
-RAW_ROOT_DIR = "/home/wei-chi/Data/ADNI_Raw_Download/ADNI" 
-CSV_PATH = "/home/wei-chi/DXSUM_10Apr2026.csv" 
-OUTPUT_DIR = "/home/wei-chi/Data/Matched_Dual_Modal_Dataset"
+RAW_ROOT_DIR = "/home/wei-chi/Alzheimers_Project/external_data/ADNI_Raw_Download/ADNI" 
+CSV_PATH = "/home/wei-chi/Alzheimers_Project/data/DXSUM_10Apr2026.csv" 
+OUTPUT_DIR = "/home/wei-chi/Alzheimers_Project/external_data/datasets/Matched_Dual_Modal_Dataset"
 
 # ==========================================
 # 2. 解析 CSV 建立診斷字典

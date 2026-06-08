@@ -1,0 +1,130 @@
+% Case Study Figure — paste into BHI 2026 paper.tex
+% Required packages (add to preamble if not already present):
+%   \usepackage{tcolorbox}
+%   \tcbuselibrary{skins,breakable}
+%   \usepackage{tabularx}
+%   \usepackage{makecell}
+
+\begin{figure*}[t]
+\centering
+\begin{tcolorbox}[
+  enhanced,
+  title={\textbf{Case Study: End-to-End Pipeline Output} \hfill
+         \small\textit{Patient sub-023\_S\_6334} $\cdot$
+         78-year-old male $\cdot$ 14 years education $\cdot$
+         \textbf{Clinical label: MCI}},
+  colframe=black!70,
+  colback=white,
+  coltitle=white,
+  colbacktitle=black!70,
+  fonttitle=\small,
+  top=4pt, bottom=4pt, left=4pt, right=4pt,
+  boxrule=0.6pt,
+  arc=3pt
+]
+
+%% ── Row 1: Classification  +  KG Retrieval ─────────────────────────────
+\begin{minipage}[t]{0.48\textwidth}
+\begin{tcolorbox}[
+  enhanced, colframe=gray!50, colback=gray!5,
+  title={\small\textbf{(1) PCAG-ComBat Classification}},
+  coltitle=black, fonttitle=\small\bfseries,
+  top=2pt, bottom=2pt, left=3pt, right=3pt, boxrule=0.4pt, arc=2pt]
+\small
+\begin{tabular}{@{}lcc@{}}
+\toprule
+Task & Prob. & Pred.\\
+\midrule
+NC vs.\ AD  & 0.318 & NC\\
+NC vs.\ MCI & 0.623 & \textbf{MCI}\,$\checkmark$\\
+MCI vs.\ AD & 0.115 & MCI\\
+\bottomrule
+\end{tabular}\\[2pt]
+\textbf{OVO Verdict:} \colorbox{yellow!40}{\textbf{MCI}} (medium confidence)
+\end{tcolorbox}
+\end{minipage}
+\hfill
+\begin{minipage}[t]{0.48\textwidth}
+\begin{tcolorbox}[
+  enhanced, colframe=gray!50, colback=gray!5,
+  title={\small\textbf{(2) Knowledge Graph + RAG Retrieval}},
+  coltitle=black, fonttitle=\small\bfseries,
+  top=2pt, bottom=2pt, left=3pt, right=3pt, boxrule=0.4pt, arc=2pt]
+\small
+\textbf{Similar patients (Neo4j KG):}\\
+\quad sub\_0117 (MCI, sim=0.818),\; 011\_S\_7048 (NC, sim=0.805)\\[2pt]
+\textbf{Retrieved literature (MMR, $k{=}5$):}\\
+\quad Vemuri et al.\ (2014) — Cognitive Reserve \& MCI\\
+\quad Zhao et al.\ (2022) — fMRI GCN for dementia prediction\\
+\quad Jack et al.\ (2010) — AD biomarker cascade model
+\end{tcolorbox}
+\end{minipage}
+
+\vspace{4pt}
+
+%% ── Row 2: Neural Evidence (sMRI + fMRI) ────────────────────────────────
+\begin{tcolorbox}[
+  enhanced, colframe=gray!50, colback=gray!5,
+  title={\small\textbf{(3) Multimodal Neural Evidence}},
+  coltitle=black, fonttitle=\small\bfseries,
+  top=2pt, bottom=2pt, left=3pt, right=3pt, boxrule=0.4pt, arc=2pt]
+\small
+\begin{minipage}[t]{0.47\textwidth}
+\textbf{sMRI — BrainIAC ViT Attention Rollout:}\\[1pt]
+\begin{tabular}{@{}lc@{}}
+ROI & Attention\\
+\hline
+Cingulum\_Mid\_L & 0.288\\
+Cingulum\_Post\_R & 0.155\\
+Precuneus\_R & 0.142\\
+Cingulum\_Post\_L & 0.144\\
+Caudate\_L & 0.070\\
+\end{tabular}
+\end{minipage}
+\hfill\vline\hfill
+\begin{minipage}[t]{0.47\textwidth}
+\textbf{fMRI — GAT Network-Level Attention:}\\[1pt]
+\begin{tabular}{@{}lc@{}}
+ROI & Salience\\
+\hline
+Cingulum\_Mid\_R & 1.000\\
+Temporal\_Sup\_R & 0.973\\
+Precuneus\_R & 0.953\\
+Cingulum\_Mid\_L & 0.961\\
+Rolandic\_Oper\_L & 0.978\\
+\end{tabular}
+\end{minipage}
+\end{tcolorbox}
+
+\vspace{4pt}
+
+%% ── Row 3: Generated Report Excerpt ─────────────────────────────────────
+\begin{tcolorbox}[
+  enhanced, colframe=gray!50, colback=blue!3,
+  title={\small\textbf{(4) Gemma3-12B Generated Report (excerpt, translated)}},
+  coltitle=black, fonttitle=\small\bfseries,
+  top=2pt, bottom=2pt, left=3pt, right=3pt, boxrule=0.4pt, arc=2pt]
+\small\itshape
+``BrainIAC attention concentrates on bilateral Cingulum (mid/post, attn$\,{=}\,$0.29--0.14)
+and Precuneus (0.14), structural regions implicated in early MCI and default-mode network
+degeneration. GAT functional analysis reveals concordant disruption in Cingulum and
+superior temporal cortex (salience ${\geq}$0.95), consistent with known salience-network
+and language-association-area vulnerability in MCI [Vemuri et al., 2014].
+Structural and functional evidence are mutually reinforcing, supporting the
+\textbf{MCI} classification.
+Given the patient's educational attainment (14 years), preserved cognitive reserve may
+partially compensate for early network disruption.
+\textbf{Recommendation:} Longitudinal follow-up with cognitive assessment every 6--12 months;
+monitor Cingulum atrophy rate as a progression biomarker.''
+\end{tcolorbox}
+
+\end{tcolorbox}
+
+\caption{End-to-end pipeline case study. For a correctly classified MCI patient, the system
+integrates PCAG-ComBat predictions (Step~1), KG-retrieved similar patients and
+RAG-retrieved literature (Step~2), multimodal neural evidence from BrainIAC ViT
+attention rollout and GAT network-level attention (Step~3), and a Gemma3-12B generated
+diagnostic report grounded in all upstream evidence (Step~4).
+Concordant Cingulum and Precuneus involvement across both modalities supports the MCI staging.}
+\label{fig:casestudy}
+\end{figure*}

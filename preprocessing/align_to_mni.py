@@ -4,8 +4,8 @@ import ants
 import time
 
 # ================= 1. 路徑設定 =================
-INPUT_DIR = "/home/wei-chi/Data/Matched_Dual_Modal_Dataset"
-OUTPUT_DIR = "/home/wei-chi/Data/ADNI_sMRI_Aligned_MNI"
+INPUT_DIR = "/home/wei-chi/Alzheimers_Project/external_data/datasets/Matched_Dual_Modal_Dataset"
+OUTPUT_DIR = "/home/wei-chi/Alzheimers_Project/external_data/datasets/ADNI_sMRI_Aligned_MNI"
 
 def align_adni_to_mni():
     print("🚀 啟動 ADNI to MNI 空間對齊引擎 (ANTs) - 遞迴增強版...")

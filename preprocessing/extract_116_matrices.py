@@ -28,7 +28,7 @@ import urllib3
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # ================= 1. 路徑設定 =================
-BASE_DIR = "/home/wei-chi/Model" 
+BASE_DIR = "/home/wei-chi/Alzheimers_Project/external_models" 
 MAPPING_CSV = os.path.join(BASE_DIR, "_dataset_mapping.csv")
 FMRI_DIR = os.path.join(BASE_DIR, "MRI_data", "fMRI")
 
@@ -36,8 +36,8 @@ OUTPUT_DIR = os.path.join(BASE_DIR, "processed_116_matrices")
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 # 指向我們訓練腳本要吃的路徑
-OUTPUT_INDEX_CSV = "/home/wei-chi/Data/dataset_index_116.csv"
-AAL_DIR = "/home/wei-chi/Data/fMRI/nilearn_data"
+OUTPUT_INDEX_CSV = "/home/wei-chi/Alzheimers_Project/external_data/metadata/dataset_index_116.csv"
+AAL_DIR = "/home/wei-chi/Alzheimers_Project/external_data/datasets/fMRI/nilearn_data"
 
 # ================= 2. 初始化 AAL 圖譜 =================
 print(f"🗺️ 正在載入 AAL 116 圖譜...")

@@ -10,14 +10,14 @@ warnings.filterwarnings('ignore')
 
 # ================= 1. 路徑設定 =================
 # 你剛才搬好家的新資料集
-MATCHED_DIR = "/home/wei-chi/Data/Matched_Dual_Modal_Dataset"
+MATCHED_DIR = "/home/wei-chi/Alzheimers_Project/external_data/datasets/Matched_Dual_Modal_Dataset"
 # 儲存 116 矩陣的新地方
-OUTPUT_MATRICES_DIR = "/home/wei-chi/Data/ADNI_processed_116_matrices"
+OUTPUT_MATRICES_DIR = "/home/wei-chi/Alzheimers_Project/external_data/features/ADNI_processed_116_matrices"
 # 儲存索引 CSV 的路徑
-OUTPUT_CSV_PATH = "/home/wei-chi/Data/adni_dataset_index_116.csv"
+OUTPUT_CSV_PATH = "/home/wei-chi/Alzheimers_Project/external_data/metadata/adni_dataset_index_116.csv"
 
 # Nilearn Atlas 快取路徑
-AAL_DIR = "/home/wei-chi/Data/nilearn_data"
+AAL_DIR = "/home/wei-chi/Alzheimers_Project/external_data/datasets/nilearn_data"
 TR_TIME = 2.0  # ADNI 3 rsfMRI 通常是 2.0 左右
 
 # ================= 2. 準備工作 =================

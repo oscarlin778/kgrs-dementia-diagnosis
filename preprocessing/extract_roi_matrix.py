@@ -62,9 +62,9 @@ def generate_output_filename(nifti_path):
     return f"Pearson_Correlation_Matrix_{diagnosis}_{subject_id}.csv"
 
 # ================= 3. 核心參數設定 =================
-INPUT_DIR = "/home/wei-chi/Data/fMRI"  # 設定為最上層資料夾
-OUTPUT_DIR = "/home/wei-chi/Model/processed_13nodes_final" 
-NODES_TXT_PATH = "/home/wei-chi/Data/AD_nodes.txt"
+INPUT_DIR = "/home/wei-chi/Alzheimers_Project/external_data/datasets/fMRI"  # 設定為最上層資料夾
+OUTPUT_DIR = "/home/wei-chi/Alzheimers_Project/external_models/processed_13nodes_final" 
+NODES_TXT_PATH = "/home/wei-chi/Alzheimers_Project/external_data/metadata/AD_nodes.txt"
 
 # ================= 4. 主程式 =================
 def main():

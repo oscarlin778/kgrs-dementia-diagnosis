@@ -1,0 +1,26 @@
+{
+  "NC_vs_AD": {
+    "GNN_AUC_TPMIC": 0.604,
+    "GNN_AUC_ADNI": 0.819,
+    "GNN_AUC_overall": 0.748,
+    "ResNet_AUC": 0.907,
+    "Meta_AUC": 0.88,
+    "auc": 0.748
+  },
+  "NC_vs_MCI": {
+    "GNN_AUC_TPMIC": 0.574,
+    "GNN_AUC_ADNI": 0.598,
+    "GNN_AUC_overall": 0.732,
+    "ResNet_AUC": 0.782,
+    "Meta_AUC": 0.769,
+    "auc": 0.732
+  },
+  "MCI_vs_AD": {
+    "GNN_AUC_TPMIC": 0.649,
+    "GNN_AUC_ADNI": 0.992,
+    "GNN_AUC_overall": 0.821,
+    "ResNet_AUC": 0.734,
+    "Meta_AUC": 0.771,
+    "auc": 0.821
+  }
+}

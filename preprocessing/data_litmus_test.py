@@ -10,7 +10,7 @@ import warnings
 warnings.filterwarnings('ignore') # 忽略除以零等數學警告
 
 # ================= 1. 路徑與參數設定 =================
-BASE_DIR = "/home/wei-chi/Data"
+BASE_DIR = "/home/wei-chi/Alzheimers_Project/external_data"
 INDEX_CSV = os.path.join(BASE_DIR, "dataset_index_116.csv")
 
 # ================= 2. 資料讀取與前處理 =================

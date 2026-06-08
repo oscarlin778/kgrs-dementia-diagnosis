@@ -47,9 +47,9 @@ def generate_output_filename(nifti_path):
     return f"sMRI_Structural_Matrix_{diagnosis}_{subject_id}.csv"
 
 # ================= 3. 核心參數設定 =================
-INPUT_DIR = "/home/wei-chi/Model/sMRI_data_MultiModal_Aligned_MNI"  
-OUTPUT_DIR = "/home/wei-chi/Model/processed_sMRI_13nodes" 
-NODES_TXT_PATH = "/home/wei-chi/Data/AD_nodes.txt"
+INPUT_DIR = "/home/wei-chi/Alzheimers_Project/external_models/sMRI_data_MultiModal_Aligned_MNI"  
+OUTPUT_DIR = "/home/wei-chi/Alzheimers_Project/external_models/processed_sMRI_13nodes" 
+NODES_TXT_PATH = "/home/wei-chi/Alzheimers_Project/external_data/metadata/AD_nodes.txt"
 
 # ================= 4. 主程式 =================
 def main():

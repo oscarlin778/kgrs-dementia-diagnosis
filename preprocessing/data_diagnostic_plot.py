@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 
 # ================= 1. 路徑設定 =================
-BASE_DIR = "/home/wei-chi/Data"
+BASE_DIR = "/home/wei-chi/Alzheimers_Project/external_data"
 # 讀取我們剛剛處理好的舊資料索引檔
 INDEX_CSV = os.path.join(BASE_DIR, "adni_dataset_index_116.csv")
 # 輸出的診斷圖名稱

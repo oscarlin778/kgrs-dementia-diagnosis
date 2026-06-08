@@ -1,10 +1,10 @@
 import pandas as pd
 
 # ================= 檔案路徑 =================
-IDA_CSV = "/home/wei-chi/Data/idaSearch_4_12_2026.csv"
-EXCLUDE_TXT = "/home/wei-chi/Data/exclude_ids.txt"
+IDA_CSV = "/home/wei-chi/Alzheimers_Project/external_data/metadata/idaSearch_4_12_2026.csv"
+EXCLUDE_TXT = "/home/wei-chi/Alzheimers_Project/external_data/metadata/exclude_ids.txt"
 # 這次我們改成輸出 txt 檔，方便你直接複製貼上
-OUTPUT_TXT = "/home/wei-chi/Data/new_adni_subjects.txt" 
+OUTPUT_TXT = "/home/wei-chi/Alzheimers_Project/external_data/metadata/new_adni_subjects.txt" 
 
 def filter_adni_data():
     print("🚀 啟動 IDA 雙模態過濾引擎 (Subject ID 專用版)...")

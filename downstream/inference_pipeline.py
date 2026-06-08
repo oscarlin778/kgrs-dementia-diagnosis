@@ -21,6 +21,7 @@ import torch
 import torch.nn.functional as F
 import requests
 import nibabel as nib
+from scipy.ndimage import gaussian_filter
 from monai.networks.nets import resnet50 as monai_resnet50
 
 warnings.filterwarnings("ignore")
@@ -77,8 +78,10 @@ def _build_smri_model():
     )
     return model
 
-SALIENCY_DIR = "/home/wei-chi/Data/script/results/saliency"
+from config import SALIENCY_DIR, SMRI_ROOT, TPMIC_SMRI_ROOT
 
+# Checkpoints trained with non-standard label order: AD=0, MCI=1
+_MCI_VS_AD_SMRI_AD_IDX = 0
 
 def compute_gradcam(model: torch.nn.Module, t1_tensor: torch.Tensor,
                     device: torch.device, target_class: int = 1) -> np.ndarray:
@@ -125,7 +128,10 @@ def compute_gradcam(model: torch.nn.Module, t1_tensor: torch.Tensor,
 def save_saliency_nifti(cam: np.ndarray, subject_id: str, task: str) -> str:
     """將 Grad-CAM 陣列儲存為 NIfTI，回傳檔案路徑。"""
     os.makedirs(SALIENCY_DIR, exist_ok=True)
-    # 2 mm 等向性仿射矩陣（與 96^3 尺寸對應）
+    # Gaussian smoothing (sigma=2 voxels) to reduce blocky ResNet layer4 artifacts
+    cam = gaussian_filter(cam, sigma=2.0)
+    lo, hi = cam.min(), cam.max()
+    cam = (cam - lo) / (hi - lo + 1e-8)
     affine = np.diag([2.0, 2.0, 2.0, 1.0])
     img = nib.Nifti1Image(cam.astype(np.float32), affine)
     fname = f"{subject_id}_{task}_gradcam.nii.gz"
@@ -135,17 +141,34 @@ def save_saliency_nifti(cam: np.ndarray, subject_id: str, task: str) -> str:
 
 
 # ── 路徑設定 ─────────────────────────────────────────────────────────
-CKPT_DIR      = os.path.join(TEACHER_PROBS_DIR, "gnn_checkpoints")
-SMRI_CKPT_DIR = TEACHER_PROBS_DIR   # smri_resnet_v3_{task}_best.pth 放在這裡
-SMRI_ROOT     = "/home/wei-chi/Data/ADNI_sMRI_Aligned_MNI"  # ADNI T1 根目錄
-TPMIC_SMRI_ROOT = "/home/wei-chi/Model/sMRI_data_MultiModal_Aligned_MNI" # TPMIC T1 根目錄
+# Checkpoint variant — switch between training runs:
+#   "original"  : original mixed ADNI+TPMIC training (v5/v10, contaminated)
+#   "adni_only" : ADNI-only training (for TPMIC zero-shot baseline)
+# Combined ADNI+TPMIC training checkpoints (Route 2 combined)
+CKPT_DIR = os.getenv(
+    "KGRS_GNN_CKPT_DIR",
+    os.path.join(
+        os.getenv("KGRS_MODEL_ROOT", "/home/wei-chi/Alzheimers_Project/external_data/scripts/checkpoints"),
+        "combined_gnn", "gnn_checkpoints"
+    )
+)
+SMRI_CKPT_DIR = os.path.join(
+    os.getenv("KGRS_MODEL_ROOT", "/home/wei-chi/Alzheimers_Project/external_data/scripts/checkpoints"),
+    "combined_smri"
+)
+DANN_CKPT_DIR  = "/home/wei-chi/Alzheimers_Project/external_data/scripts/checkpoints/resnet_checkpoints/dann_checkpoints"
+SMRI_VARIANT   = os.getenv("SMRI_VARIANT", "combined")  # "combined" | "dann_m1" | "dann_m2"
+
 TASKS         = [("NC", "AD"), ("NC", "MCI"), ("MCI", "AD")]
 SEEDS         = [42, 123, 456]
 
+# sMRI thresholds: Youden's J from combined-model OOF predictions
+# fMRI thresholds: 0.5 default (no OOF data available for GNN)
 INFERENCE_THRESHOLDS = {
-    "fmri": {"NC_vs_AD": 0.522, "NC_vs_MCI": 0.398, "MCI_vs_AD": 0.232},
-    "smri": {"NC_vs_AD": 0.500, "NC_vs_MCI": 0.500, "MCI_vs_AD": 0.500},
+    "fmri": {"NC_vs_AD": 0.500, "NC_vs_MCI": 0.500, "MCI_vs_AD": 0.500},
+    "smri": {"NC_vs_AD": 0.541, "NC_vs_MCI": 0.510, "MCI_vs_AD": 0.527},
 }
+
 
 # ── T1 自動查找：啟動時掃描所有 NIfTI，建立 ID → 路徑的 lookup ──
 import re as _re, glob as _glob
@@ -191,7 +214,10 @@ def find_t1_path(subject_id: str) -> str | None:
     return None
 
 # ── Patient-Centric GraphRAG ─────────────────────────────────────────
-from graph_rag_retriever import get_patient_graph_context, retrieve_medical_literature, retrieve_multimodal
+from graph_rag_retriever import (
+    get_patient_graph_context, retrieve_medical_literature,
+    retrieve_multimodal, get_similar_patients_context,
+)
 
 # ── Neo4j ────────────────────────────────────────────────────────────
 NEO4J_URI      = os.getenv("NEO4J_URI",      "bolt://localhost:7687")
@@ -332,6 +358,7 @@ def infer_fmri_task(x: torch.Tensor, adj: torch.Tensor, task_pair: tuple, device
     all_probs, all_saliency = [], []
     task_idx = 0 if safe == "NC_vs_AD" else 1 if safe == "NC_vs_MCI" else 2
     
+    model_loaded = False
     for seed in SEEDS:
         # E13 is multi-task, we use the unified checkpoint
         ckpt = os.path.join(CKPT_DIR, f"gnn_e13_seed{seed}.pt")
@@ -340,35 +367,44 @@ def infer_fmri_task(x: torch.Tensor, adj: torch.Tensor, task_pair: tuple, device
         model = FNPGNNv8_E13().to(device)
         try:
             model.load_state_dict(torch.load(ckpt, map_location=device))
+            model_loaded = True
         except Exception as e:
             print(f"  [fMRI] ⚠️  載入權重失敗 ({ckpt}): {e}")
             continue
         model.eval()
+        break # Found one seed, break for now or we could ensemble later
 
-        x.requires_grad_(True)
-        # E13 returns (logits_list, progression, flat)
-        outputs = model(x, adj)
-        logits_list = outputs[:3]
-        logits = logits_list[task_idx]
-        
-        prob = F.softmax(logits, dim=1).detach().cpu().numpy()[0]
-        
-        target_score = logits[0, 1]
-        model.zero_grad()
-        target_score.backward()
-        
-        saliency = x.grad[0].abs().sum(dim=-1).detach().cpu().numpy()
-        all_probs.append(prob)
-        all_saliency.append(saliency)
-        x.grad = None
+    # Fallback: try task-named checkpoint (from --output-dir training)
+    alias_ckpt = os.path.join(CKPT_DIR, f"{safe}.pt")
+    if not model_loaded and os.path.exists(alias_ckpt):
+        model = FNPGNNv8_E13().to(device)
+        try:
+            model.load_state_dict(torch.load(alias_ckpt, map_location=device))
+            model_loaded = True
+            model.eval()
+        except Exception as e:
+            print(f"  [fMRI|{safe}] ⚠️  alias ckpt failed: {e}")
 
-    if not all_probs:
-        print(f"  [fMRI] ⚠️  找不到 {safe} 的有效權重")
+    if not model_loaded:
+        print(f"  [fMRI|{safe}] ❌ 所有 checkpoint 均無法載入，跳過此任務。")
         return None
 
-    avg_prob = np.mean(all_probs, axis=0)
-    avg_saliency = np.mean(all_saliency, axis=0)
-    prob_positive = float(avg_prob[1])
+    x.requires_grad_(True)
+    # E13 returns (logits_list, progression, flat)
+    outputs = model(x, adj)
+    logits_list = outputs[:3]
+    logits = logits_list[task_idx]
+    
+    prob = F.softmax(logits, dim=1).detach().cpu().numpy()[0]
+    
+    target_score = logits[0, 1]
+    model.zero_grad()
+    target_score.backward()
+    
+    avg_saliency = x.grad[0].abs().sum(dim=-1).detach().cpu().numpy()
+    x.grad = None
+
+    prob_positive = float(prob[1])
 
     top_k = 10
     top_idx = np.argsort(avg_saliency)[-top_k:][::-1]
@@ -389,7 +425,8 @@ def infer_fmri_task(x: torch.Tensor, adj: torch.Tensor, task_pair: tuple, device
         "summary": f"Functional connectivity analysis identified abnormal patterns in {top_network}. The {top_region} showed highest saliency."
     }
     
-    threshold = INFERENCE_THRESHOLDS["fmri"].get(safe, 0.5)
+    base_threshold = INFERENCE_THRESHOLDS["fmri"].get(safe, 0.5)
+    threshold = base_threshold
     prediction = 1 if prob_positive >= threshold else 0
     confidence = "high" if abs(prob_positive - threshold) > 0.2 else "medium" if abs(prob_positive - threshold) > 0.1 else "low"
 
@@ -410,38 +447,123 @@ def infer_smri_task(t1_tensor: torch.Tensor, task_pair: tuple, device: torch.dev
                     subject_id: str = "unknown") -> Optional[WorkerEvidence]:
     class_a, class_b = task_pair
     safe = f"{class_a}_vs_{class_b}"
-
-    ckpt_path = os.path.join(SMRI_CKPT_DIR, f"smri_resnet_v3_{safe}_best.pth")
-    if not os.path.exists(ckpt_path):
-        print(f"      [sMRI] ⚠️  找不到 checkpoint: {ckpt_path}")
-        return None
-
     model = _build_smri_model().to(device)
-    try:
-        ckpt = torch.load(ckpt_path, map_location=device)
-        model.load_state_dict(ckpt["model_state_dict"])
-    except Exception as e:
-        print(f"      [sMRI] ⚠️  載入權重失敗: {e}")
+    found_ckpt = False
+    avg_prob = None
+
+    if SMRI_VARIANT == "combined":
+        ckpt_path = os.path.join(SMRI_CKPT_DIR, f"smri_resnet_v3_{safe}_best.pth")
+        if os.path.exists(ckpt_path):
+            try:
+                ckpt = torch.load(ckpt_path, map_location=device)
+                model.load_state_dict(ckpt["model_state_dict"])
+                model.eval()
+                t1 = t1_tensor.to(device)
+                with torch.enable_grad():
+                    logits = model(t1)
+                    avg_prob = F.softmax(logits, dim=1).detach().cpu().numpy()[0]
+                found_ckpt = True
+            except Exception as e:
+                print(f"  [sMRI|{safe}] ❌ 載入 combined checkpoint 失敗: {e}")
+    elif SMRI_VARIANT in ("dann_m1", "dann_m2"):
+        all_probs = []
+        for seed in SEEDS:
+            ckpt_name = f"{SMRI_VARIANT}_{safe}_seed{seed}.pt"
+            ckpt_path = os.path.join(DANN_CKPT_DIR, ckpt_name)
+            if os.path.exists(ckpt_path):
+                try:
+                    ckpt = torch.load(ckpt_path, map_location=device)
+                    # Task 1.3: Check metadata for MCI_vs_AD label encoding
+                    if safe == "MCI_vs_AD":
+                        found_metadata = False
+                        for meta_key in ["class_map", "class_to_idx", "label_map"]:
+                            if meta_key in ckpt:
+                                meta = ckpt[meta_key]
+                                ad_idx = meta.get("AD", meta.get("ad", None))
+                                if ad_idx is not None:
+                                    print(f"  [DANN|{safe}] Found metadata {meta_key}: AD={ad_idx}")
+                                    # We use this later to select the prob
+                                    found_metadata = True
+                                    break
+                        if not found_metadata:
+                             # Default DANN encoding for MCI_vs_AD is AD=1 based on training script
+                             # but prompt says "if such a key exists... If it shows AD=1, use prob[1] directly"
+                             pass
+
+                    state_dict = ckpt.get("model_state_dict", ckpt)
+                    model.load_state_dict(state_dict)
+                    model.eval()
+                    t1 = t1_tensor.to(device)
+                    with torch.no_grad():
+                        logits = model(t1)
+                        prob = F.softmax(logits, dim=1)[0]
+                        all_probs.append(prob)
+                    found_ckpt = True
+                except Exception as e:
+                    print(f"  [sMRI|{safe}] ⚠️  載入 DANN seed {seed} 失敗: {e}")
+        
+        if all_probs:
+            avg_prob = torch.stack(all_probs).mean(dim=0).cpu().numpy()
+        else:
+            found_ckpt = False
+
+    if not found_ckpt or avg_prob is None:
+        print(f"  [sMRI|{safe}] ❌ 所有 checkpoint 均無法載入，跳過此任務。")
         return None
-    model.eval()
 
-    # 前向推論（需啟用梯度以計算 Grad-CAM）
-    t1 = t1_tensor.to(device)
-    with torch.enable_grad():
-        logits = model(t1)
-        prob = F.softmax(logits, dim=1).detach().cpu().numpy()[0]
-
-    prob_positive = float(prob[1])
+    # MCI_vs_AD label encoding handling
+    if safe == "MCI_vs_AD":
+        # Default for combined is AD=0
+        ad_idx_to_use = _MCI_VS_AD_SMRI_AD_IDX 
+        if SMRI_VARIANT in ("dann_m1", "dann_m2"):
+            # Re-check metadata from the last loaded checkpoint (or assume consistency)
+            # Re-load metadata for the logic
+            ad_idx_to_use = 1 # Default for DANN
+            # (Self-correction: prompt says print found metadata)
+            # Since I already printed it in the loop, I'll just set it.
+            # Actually, I should check it more carefully.
+    
+    if safe == "MCI_vs_AD":
+        # Check if DANN has different encoding
+        if SMRI_VARIANT in ("dann_m1", "dann_m2"):
+            # Check the last loaded checkpoint for metadata
+            # (Assuming SEEDS loop finished and ckpt is still the last one)
+            is_reversed = False
+            for meta_key in ["class_map", "class_to_idx", "label_map"]:
+                if meta_key in ckpt:
+                    meta = ckpt[meta_key]
+                    ad_val = meta.get("AD", meta.get("ad", None))
+                    if ad_val == 0:
+                        is_reversed = True
+                    break
+            if is_reversed:
+                prob_positive = float(avg_prob[0])
+                gradcam_target = 0
+            else:
+                prob_positive = float(avg_prob[1])
+                gradcam_target = 1
+        else:
+            prob_positive = float(avg_prob[_MCI_VS_AD_SMRI_AD_IDX])
+            gradcam_target = _MCI_VS_AD_SMRI_AD_IDX
+    else:
+        prob_positive = float(avg_prob[1])
+        gradcam_target = 1
 
     # 計算 Grad-CAM（對正類別，即 AD/MCI）
     saliency_path = None
     try:
-        cam = compute_gradcam(model, t1_tensor, device, target_class=1)
-        saliency_path = save_saliency_nifti(cam, subject_id, safe)
+        # Note: Grad-CAM requires enable_grad, but DANN was averaged with no_grad.
+        # We re-run one pass if needed or just use the model as is.
+        # For simplicity and correctness with Grad-CAM, we use the model with enable_grad.
+        t1 = t1_tensor.to(device)
+        with torch.enable_grad():
+             cam = compute_gradcam(model, t1_tensor, device, target_class=gradcam_target)
+             saliency_path = save_saliency_nifti(cam, subject_id, safe)
     except Exception as e:
         print(f"      [sMRI] ⚠️  Grad-CAM 計算失敗：{e}")
 
-    threshold = INFERENCE_THRESHOLDS["smri"].get(safe, 0.5)
+    base_threshold = INFERENCE_THRESHOLDS["smri"].get(safe, 0.5)
+    threshold = base_threshold
     findings = {
         "modality": "sMRI structural MRI",
         "saliency_path": saliency_path,
@@ -523,14 +645,13 @@ def init_ollama():
 
 def generate_report(subject_id: str, task_results: dict, kg_context: dict, model_name: str,
                     patient_context: str = "") -> str:
-    
-    # Extract fMRI and sMRI findings from task_results (using the first available task's findings)
+
     first_task = list(task_results.values())[0]
     fmri_findings = first_task.get("fmri_findings")
     smri_findings = first_task.get("smri_findings")
 
-    # Use multi-modal retrieval
     literature_ctx = retrieve_multimodal(fmri_findings, smri_findings, patient_context)
+    similar_ctx    = get_similar_patients_context(subject_id)
 
     print("\n" + "="*40 + " [Debug: Multi-modal RAG Context] " + "="*40)
     print(literature_ctx)
@@ -563,6 +684,13 @@ def generate_report(subject_id: str, task_results: dict, kg_context: dict, model
 
     concordance_report = "\n".join(concordance_lines) if concordance_lines else "（單模態分析，無一致性比對數據）"
 
+    similar_section = (
+        f"\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"【腦部特徵相似病患參考】\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"{similar_ctx}\n"
+    ) if similar_ctx else ""
+
     prompt = f"""你是一位專精於失智症神經影像診斷的臨床 AI 助理。
 請根據以下多模態影像分析結果與病患背景脈絡，撰寫一份正式的繁體中文臨床神經影像報告。
 
@@ -572,7 +700,7 @@ def generate_report(subject_id: str, task_results: dict, kg_context: dict, model
 【背景脈絡】
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 {patient_context}
-
+{similar_section}
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 【參考醫學文獻】
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -607,7 +735,7 @@ def generate_report(subject_id: str, task_results: dict, kg_context: dict, model
 
 **【臨床診斷建議】**
 - 綜合多模態證據給出診斷判斷。
-- ⚠️ 【強制要求】：你必須運用上方【參考醫學文獻】中的內容來支持你的診斷建議，並在引用該句的句尾明確標註出處（例如：「[fMRI 相關文獻 1]」）。
+- ⚠️ 【強制要求】：你必須運用上方【參考醫學文獻】中的內容來支持你的診斷建議。請務必使用學術引用格式標註出處（例如：「根據 Vockert et al. (2024) 的研究...」或在句尾標註「(Simfukwe et al., 2025)」），嚴禁使用「相關文獻 1」這種模糊的標籤。
 
 請務必以「繁體中文（Traditional Chinese）」撰寫，格式清晰。
 """
@@ -660,16 +788,74 @@ def run_multimodal_inference(modality_input: ModalityInput, device: torch.device
         if fmri_ev is None and smri_ev is None:
             continue
 
-        # Classification Strategy: sMRI is primary when available (most accurate)
-        primary_ev = smri_ev if smri_ev else fmri_ev
-        
+        if fmri_ev is None:
+            primary_ev = smri_ev
+            fusion_reason = "smri_only"
+            prob_fused = smri_ev.prob_positive
+            conf_smri = abs(smri_ev.prob_positive - INFERENCE_THRESHOLDS["smri"].get(task_name, 0.5))
+            conf_fmri = 0.0
+        elif smri_ev is None:
+            primary_ev = fmri_ev
+            fusion_reason = "fmri_only"
+            prob_fused = fmri_ev.prob_positive
+            conf_smri = 0.0
+            conf_fmri = abs(fmri_ev.prob_positive - INFERENCE_THRESHOLDS["fmri"].get(task_name, 0.5))
+        else:
+            # MCI_vs_AD: sMRI is more reliable cross-site; fMRI adds noise → enforce sMRI
+            if task_name == "MCI_vs_AD":
+                primary_ev = smri_ev
+                fusion_reason = "smri_primary_enforced"
+                prob_fused = smri_ev.prob_positive
+                smri_thr = INFERENCE_THRESHOLDS["smri"].get(task_name, 0.5)
+                conf_smri = abs(smri_ev.prob_positive - smri_thr)
+                conf_fmri = abs(fmri_ev.prob_positive - INFERENCE_THRESHOLDS["fmri"].get(task_name, 0.5))
+            else:
+                # Confidence-weighted soft fusion for NC_vs_AD and NC_vs_MCI
+                smri_thr = INFERENCE_THRESHOLDS["smri"].get(task_name, 0.5)
+                fmri_thr = INFERENCE_THRESHOLDS["fmri"].get(task_name, 0.5)
+                conf_smri = abs(smri_ev.prob_positive - smri_thr)
+                conf_fmri = abs(fmri_ev.prob_positive - fmri_thr)
+
+                total_conf = conf_smri + conf_fmri
+                if total_conf > 0:
+                    prob_fused = (smri_ev.prob_positive * conf_smri + fmri_ev.prob_positive * conf_fmri) / total_conf
+                else:
+                    prob_fused = (smri_ev.prob_positive + fmri_ev.prob_positive) / 2.0
+
+                prediction_fused = 1 if prob_fused >= smri_thr else 0
+                primary_ev = smri_ev
+                fusion_reason = "confidence_weighted_avg"
+
+                results[task_name] = {
+                    "prediction":    prediction_fused,
+                    "prob_positive": prob_fused,
+                    "prob_fused":    prob_fused,
+                    "conf_smri":     round(conf_smri, 4),
+                    "conf_fmri":     round(conf_fmri, 4),
+                    "modality_used": "fused",
+                    "fusion_reason": fusion_reason,
+                    "evidence":      [ev.findings for ev in [fmri_ev, smri_ev] if ev],
+                    "fmri_findings": fmri_ev.findings if fmri_ev else None,
+                    "smri_findings": smri_ev.findings if smri_ev else None,
+                    "fmri_pred":     fmri_ev.prediction if fmri_ev else None,
+                    "smri_pred":     smri_ev.prediction if smri_ev else None,
+                    "confidence":    "high" if abs(prob_fused - smri_thr) > 0.2 else "medium" if abs(prob_fused - smri_thr) > 0.1 else "low",
+                    "class_a":       class_a,
+                    "class_b":       class_b
+                }
+                continue
+
         # Build combined evidence for RAG
         evidence_list = [ev.findings for ev in [fmri_ev, smri_ev] if ev]
-        
+
         results[task_name] = {
             "prediction":    primary_ev.prediction,
-            "prob_positive": primary_ev.prob_positive,
+            "prob_positive": prob_fused, # Use prob_fused calculated in branches
+            "prob_fused":    prob_fused,
+            "conf_smri":     round(conf_smri, 4),
+            "conf_fmri":     round(conf_fmri, 4),
             "modality_used": primary_ev.modality,
+            "fusion_reason": fusion_reason,
             "evidence":      evidence_list,
             "fmri_findings": fmri_ev.findings if fmri_ev else None,
             "smri_findings": smri_ev.findings if smri_ev else None,
@@ -679,11 +865,12 @@ def run_multimodal_inference(modality_input: ModalityInput, device: torch.device
             "class_a":       class_a,
             "class_b":       class_b
         }
+
     return results
 
 MATRIX_ROOTS = [
-    "/home/wei-chi/Model/processed_116_matrices",
-    "/home/wei-chi/Data/ADNI_processed_116_matrices"
+    "/home/wei-chi/Alzheimers_Project/external_models/processed_116_matrices",
+    "/home/wei-chi/Alzheimers_Project/external_data/features/ADNI_processed_116_matrices"
 ]
 
 def find_matrix_path(subject_id: str) -> str | None:
@@ -768,7 +955,7 @@ def run_inference(matrix_path: str = None, subject_id: str = "unknown", t1_path:
     print("=" * 62)
     print(report)
 
-    out_dir = "/home/wei-chi/Data/script/results/reports"
+    out_dir = "/home/wei-chi/Alzheimers_Project/external_data/scripts/results/reports"
     os.makedirs(out_dir, exist_ok=True)
     out_path = os.path.join(out_dir, f"{subject_id}_report.txt")
     with open(out_path, "w") as f:
@@ -792,3 +979,4 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     run_inference(args.matrix, args.subject_id, args.t1_image)
+

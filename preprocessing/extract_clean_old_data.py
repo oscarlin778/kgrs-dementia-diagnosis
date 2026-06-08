@@ -31,17 +31,17 @@ from nilearn.maskers import NiftiLabelsMasker
 from nilearn.connectome import ConnectivityMeasure
 
 # ================= 1. 路徑設定 =================
-BASE_DIR = "/home/wei-chi/Data"
+BASE_DIR = "/home/wei-chi/Alzheimers_Project/external_data"
 
 # 【關鍵修改：指定 32 筆舊資料的確切位置】
-OLD_NIFTI_ROOT = "/home/wei-chi/Data/fMRI"
+OLD_NIFTI_ROOT = "/home/wei-chi/Alzheimers_Project/external_data/datasets/fMRI"
 
 # 輸出的新資料夾 (舊資料的乾淨 116 矩陣)
 OUTPUT_MATRICES_DIR = os.path.join(BASE_DIR, "processed_116_clean_old_matrices")
 OUTPUT_CSV_PATH = os.path.join(BASE_DIR, "dataset_index_116_clean_old.csv")
 
 # 本地圖譜位置
-POSSIBLE_NILEARN_DIRS = ["/home/wei-chi/Data/nilearn_data", "/home/wei-chi/nilearn_data"]
+POSSIBLE_NILEARN_DIRS = ["/home/wei-chi/Alzheimers_Project/external_data/datasets/nilearn_data", "/home/wei-chi/nilearn_data"]
 NILEARN_DIR = next((d for d in POSSIBLE_NILEARN_DIRS if os.path.exists(d)), None)
 
 TR_TIME = 2.0 

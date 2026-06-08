@@ -32,6 +32,16 @@ SCRIPTS    = os.path.dirname(BASE)
 PCAG_CKPT_DIR       = os.path.join(BASE, "checkpoints", "pcag_combat_v2")
 PCAG_FMRI_ONLY_DIR  = os.path.join(BASE, "checkpoints", "pcag_combat_v2_fmri_only_fmricombat_nolabel")
 PCAG_SMRI_ONLY_DIR  = os.path.join(BASE, "checkpoints", "pcag_combat_v2_smri_only_fmricombat_nolabel")
+
+# MCI_vs_AD 5-seed noaug ensemble（論文 median 策略，所有 seed 都已訓練完畢）
+_NOAUG_BASE = os.path.join(BASE, "checkpoints", "pcag_ensemble_noaug_v2_fmricombat_nolabel")
+PCAG_MCIAD_ENSEMBLE_DIRS = [
+    _NOAUG_BASE,
+    _NOAUG_BASE + "_s123",
+    _NOAUG_BASE + "_s456",
+    _NOAUG_BASE + "_s789",
+    _NOAUG_BASE + "_s2024",
+]
 KD_CKPT_DIR         = os.path.join(SCRIPTS, "checkpoints", "resnet_checkpoints", "gnn_checkpoints")
 VIT_CKPT       = os.path.join(SCRIPTS, "models", "checkpoints",
                                "finetune_tpmic_full", "vit_mci.ckpt")
@@ -182,16 +192,67 @@ class PCAGFusion(nn.Module):
                             "Q": Q.detach(), "K": K.detach()}
         return logits
 
+class BidirectionalPCAGFusion(nn.Module):
+    """Phase-1 upgrade: bidirectional cross-attention (fMRI↔sMRI), param-efficient."""
+    def __init__(self, fmri_dim=1280, smri_dim=768, fusion_dim=20, num_classes=2):
+        super().__init__()
+        self.fmri_proj   = nn.Linear(fmri_dim, fusion_dim)
+        self.smri_proj_k = nn.Linear(smri_dim,  fusion_dim)
+        self.smri_proj_v = nn.Linear(smri_dim,  fusion_dim)
+        self.W_e1  = nn.Linear(fusion_dim, fusion_dim)
+        self.W_g11 = nn.Linear(fusion_dim, fusion_dim)
+        self.W_g12 = nn.Linear(fusion_dim, fusion_dim)
+        self.ln_e1 = nn.LayerNorm(fusion_dim)
+        self.ln_g1 = nn.LayerNorm(fusion_dim)
+        self.smri_proj   = nn.Linear(smri_dim,  fusion_dim)
+        self.fmri_proj_k = nn.Linear(fmri_dim,  fusion_dim)
+        self.fmri_proj_v = nn.Linear(fmri_dim,  fusion_dim)
+        self.W_e2  = nn.Linear(fusion_dim, fusion_dim)
+        self.W_g21 = nn.Linear(fusion_dim, fusion_dim)
+        self.W_g22 = nn.Linear(fusion_dim, fusion_dim)
+        self.ln_e2 = nn.LayerNorm(fusion_dim)
+        self.ln_g2 = nn.LayerNorm(fusion_dim)
+        self.merge_w = nn.Parameter(torch.tensor(0.5))
+        self.ln_out  = nn.LayerNorm(fusion_dim)
+        self.classifier = nn.Sequential(nn.Dropout(0.3), nn.Linear(fusion_dim, num_classes))
+
+    def _pcag_attn(self, Q, K, V, W_e, W_g1, W_g2, ln_e, ln_g):
+        P = (torch.tanh(Q) * torch.tanh(K) + 1) / 2
+        V_hat = torch.sigmoid((Q * K) * P) * V
+        E = F.relu(W_e(V_hat)); G = F.relu(W_g1(V_hat) + W_g2(Q))
+        return ln_e(E) * ln_g(G)
+
+    def forward(self, fmri_emb, smri_feat, return_attn: bool = False):
+        Q_f = self.fmri_proj(fmri_emb)
+        Q_s = self.smri_proj(smri_feat)
+        C1 = self._pcag_attn(Q_f, self.smri_proj_k(smri_feat), self.smri_proj_v(smri_feat),
+                              self.W_e1, self.W_g11, self.W_g12, self.ln_e1, self.ln_g1) + F.relu(Q_f)
+        C2 = self._pcag_attn(Q_s, self.fmri_proj_k(fmri_emb), self.fmri_proj_v(fmri_emb),
+                              self.W_e2, self.W_g21, self.W_g22, self.ln_e2, self.ln_g2) + F.relu(Q_s)
+        w = torch.sigmoid(self.merge_w)
+        out = self.ln_out(w * C1 + (1 - w) * C2)
+        logits = self.classifier(out)
+        if return_attn:
+            return logits, {"Q_f": Q_f.detach(), "Q_s": Q_s.detach(),
+                            "C1": C1.detach(), "C2": C2.detach(),
+                            "merge_w": w.item()}
+        return logits
+
+
 class PCAGModel(nn.Module):
-    def __init__(self, fusion_dim=20):
+    def __init__(self, fusion_dim=20, bidir_fusion=False):
         super().__init__()
         self.fmri_encoder = FMRIEncoder()
-        self.pcag = PCAGFusion(fusion_dim=fusion_dim)
+        if bidir_fusion:
+            self.pcag = BidirectionalPCAGFusion(fusion_dim=fusion_dim)
+        else:
+            self.pcag = PCAGFusion(fusion_dim=fusion_dim)
+
     def forward(self, x_node, adj, smri_feat, return_attn: bool = False):
         fmri_emb = self.fmri_encoder(x_node, adj)
         if return_attn:
             logits, attn = self.pcag(fmri_emb, smri_feat, return_attn=True)
-            attn["fmri_emb"] = fmri_emb.detach()  # for projection-weight analysis
+            attn["fmri_emb"] = fmri_emb.detach()
             return logits, attn
         return self.pcag(fmri_emb, smri_feat)
 
@@ -318,11 +379,23 @@ def load_pcag_models(task: str, ckpt_dir: str = None):
     for fold in range(5):
         path = os.path.join(base, f"pcag_combat_{task}_fold{fold}.pt")
         ckpt = torch.load(path, map_location='cpu', weights_only=False)
-        m = PCAGModel().to(DEVICE)
+        is_bidir = ckpt.get('model_version', 'v1') == 'bidir_v1'
+        m = PCAGModel(fusion_dim=ckpt.get('fusion_dim', 20),
+                      bidir_fusion=is_bidir).to(DEVICE)
         m.load_state_dict(ckpt['model_state'])
         m.eval()
         models.append(m)
     return models
+
+def load_pcag_models_multi_seed(task: str, seed_dirs: list):
+    """從多個 seed 目錄載入模型，用於 5-seed ensemble（如 MCI_vs_AD）。"""
+    all_models = []
+    for d in seed_dirs:
+        try:
+            all_models.extend(load_pcag_models(task, d))
+        except Exception as e:
+            print(f"  [warn] 跳過 {d}: {e}")
+    return all_models
 
 def load_kd_models():
     models = []
@@ -364,9 +437,12 @@ class InferencePipelineV2:
         self.smri_tfm   = get_smri_transform()
 
         # Dual-modal (fusion) models
+        # NC_vs_AD: seed=42 aug（5 folds）
+        # NC_vs_MCI: seed=456 noaug（5 folds，論文 single_best 策略）
+        # MCI_vs_AD: 5-seed noaug median ensemble（25 models，論文 median 策略）
         self.pcag_nc_ad   = load_pcag_models('NC_vs_AD')
         self.pcag_nc_mci  = load_pcag_models('NC_vs_MCI')
-        self.pcag_mci_ad  = load_pcag_models('MCI_vs_AD')
+        self.pcag_mci_ad  = load_pcag_models_multi_seed('MCI_vs_AD', PCAG_MCIAD_ENSEMBLE_DIRS)
         self.kd_mci_ad    = load_kd_models()
 
         # fMRI-only ablation models (all 3 tasks)
@@ -420,9 +496,12 @@ class InferencePipelineV2:
         smri_t = torch.tensor(smri_harmonized, dtype=torch.float32).unsqueeze(0).to(DEVICE)
         probs  = []
         for m in models:
-            out = F.softmax(m(x, adj, smri_t), dim=1)
+            result = m(x, adj, smri_t)
+            # PCAGModel.forward() 回傳 logits（inference 版不含 align_loss）
+            logits = result[0] if isinstance(result, tuple) else result
+            out = F.softmax(logits, dim=1)
             probs.append(out[0, 1].item())
-        return float(np.mean(probs))
+        return float(np.median(probs) if len(probs) > 5 else np.mean(probs))
 
     @torch.no_grad()
     def _kd_predict(self, models, x, adj):

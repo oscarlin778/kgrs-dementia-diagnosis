@@ -27,3 +27,30 @@ The **Knowledge Graph-based Reporting System (KGRS)** is a comprehensive, dual-m
 * **Frontend:** React, Vite, Tailwind CSS, Recharts, NiiVue.js
 * **Database & AI:** Neo4j (Knowledge Graph), Ollama (Local LLM Inference)
 
+### 📁 Directory Structure
+
+```
+scripts/
+├── downstream/         # Inference pipeline, API server, training scripts
+│   ├── api_server.py
+│   ├── inference_pipeline_v2.py
+│   ├── train_pcag_combat_fusion.py
+│   └── train_pcag_multitask.py  (Phase-3 multi-task training)
+├── models/             # Model architecture & historical training scripts
+│   ├── run_ablations.sh
+│   └── run_training_pipeline.sh
+├── preprocessing/      # Data preprocessing (fMRI ComBat, sMRI feature extraction)
+├── analysis/           # Evaluation & analysis scripts
+│   ├── analyze_splits.py
+│   └── check_labels.py
+├── visualization/      # Plotting utilities & output figures
+│   ├── plot_results.py
+│   └── figures/        # Generated PNG outputs
+├── data/               # Data import/preparation utilities
+│   ├── import_patients_to_neo4j.py
+│   └── prepare_patient_nodes.py
+├── utils/              # Shared utility functions
+├── logs/               # Training & evaluation logs
+└── checkpoints/        # Model checkpoints (not tracked by git)
+```
+

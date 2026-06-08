@@ -51,7 +51,7 @@ def check_nifti_dimensions(data_dirs, num_samples=3):
 if __name__ == "__main__":
     # 同時掃描 Data 底下的 fMRI 以及上一層的 Model 目錄
     TARGET_DIRS = [
-        "/home/wei-chi/Data/fMRI", 
-        "/home/wei-chi/Model"
+        "/home/wei-chi/Alzheimers_Project/external_data/datasets/fMRI", 
+        "/home/wei-chi/Alzheimers_Project/external_models"
     ]
     check_nifti_dimensions(TARGET_DIRS)

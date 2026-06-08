@@ -23,10 +23,10 @@ from nilearn.maskers import NiftiLabelsMasker
 from nilearn.connectome import ConnectivityMeasure
 
 # ================= 1. 路徑設定 =================
-BASE_DIR = "/home/wei-chi/Data"
-MODEL_DIR = "/home/wei-chi/Model/MRI_data/fMRI"
+BASE_DIR = "/home/wei-chi/Alzheimers_Project/external_data"
+MODEL_DIR = "/home/wei-chi/Alzheimers_Project/external_models/MRI_data/fMRI"
 NIFTI_DIR = os.path.join(MODEL_DIR, "nifti")
-MAPPING_CSV = os.path.join(MODEL_DIR, "/home/wei-chi/Model/_dataset_mapping.csv")
+MAPPING_CSV = os.path.join(MODEL_DIR, "/home/wei-chi/Alzheimers_Project/external_models/_dataset_mapping.csv")
 AAL_DIR = os.path.join(BASE_DIR, "nilearn_data")
 
 OUTPUT_MATRICES_DIR = os.path.join(BASE_DIR, "processed_116_clean_matrices")

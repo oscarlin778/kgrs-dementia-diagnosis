@@ -145,21 +145,84 @@ class PCAGFusion(nn.Module):
         Q = self.fmri_proj(fmri_emb); K = self.smri_proj_k(smri_feat); V = self.smri_proj_v(smri_feat)
         P = (torch.tanh(Q) * torch.tanh(K) + 1) / 2; A_gated = (Q * K) * P; S = torch.sigmoid(A_gated); V_hat = S * V
         E = F.relu(self.W_e(V_hat)); G = F.relu(self.W_g1(V_hat) + self.W_g2(Q)); C = self.ln_e(E) * self.ln_g(G)
-        return self.classifier(C + F.relu(Q))
+        return self.classifier(C + F.relu(Q)), torch.tensor(0.0)  # (logits, align_loss=0)
+
+
+class BidirectionalPCAGFusion(nn.Module):
+    """Phase-1 upgrade: bidirectional cross-attention (fMRI↔sMRI).
+    Kept parameter-efficient for small-N datasets: same fusion_dim as v1,
+    merge by learnable weighted sum (no large FFN).
+    No alignment loss — modalities should stay complementary.
+    """
+    def __init__(self, fmri_dim=1280, smri_dim=768, fusion_dim=20, num_classes=2):
+        super().__init__()
+        # Direction 1: fMRI (Q) → sMRI (K, V)  [original PCAG mechanism]
+        self.fmri_proj   = nn.Linear(fmri_dim, fusion_dim)
+        self.smri_proj_k = nn.Linear(smri_dim,  fusion_dim)
+        self.smri_proj_v = nn.Linear(smri_dim,  fusion_dim)
+        self.W_e1  = nn.Linear(fusion_dim, fusion_dim)
+        self.W_g11 = nn.Linear(fusion_dim, fusion_dim)
+        self.W_g12 = nn.Linear(fusion_dim, fusion_dim)
+        self.ln_e1 = nn.LayerNorm(fusion_dim)
+        self.ln_g1 = nn.LayerNorm(fusion_dim)
+
+        # Direction 2: sMRI (Q) → fMRI (K, V)  [reverse direction]
+        self.smri_proj   = nn.Linear(smri_dim,  fusion_dim)
+        self.fmri_proj_k = nn.Linear(fmri_dim,  fusion_dim)
+        self.fmri_proj_v = nn.Linear(fmri_dim,  fusion_dim)
+        self.W_e2  = nn.Linear(fusion_dim, fusion_dim)
+        self.W_g21 = nn.Linear(fusion_dim, fusion_dim)
+        self.W_g22 = nn.Linear(fusion_dim, fusion_dim)
+        self.ln_e2 = nn.LayerNorm(fusion_dim)
+        self.ln_g2 = nn.LayerNorm(fusion_dim)
+
+        # Merge: learnable scalar blend (no large FFN → fewer params)
+        self.merge_w = nn.Parameter(torch.tensor(0.5))
+        self.ln_out  = nn.LayerNorm(fusion_dim)
+        self.classifier = nn.Sequential(nn.Dropout(0.3), nn.Linear(fusion_dim, num_classes))
+
+    def _pcag_attn(self, Q, K, V, W_e, W_g1, W_g2, ln_e, ln_g):
+        P = (torch.tanh(Q) * torch.tanh(K) + 1) / 2
+        V_hat = torch.sigmoid((Q * K) * P) * V
+        E = F.relu(W_e(V_hat))
+        G = F.relu(W_g1(V_hat) + W_g2(Q))
+        return ln_e(E) * ln_g(G)
+
+    def forward(self, fmri_emb, smri_feat):
+        Q_f = self.fmri_proj(fmri_emb)
+        Q_s = self.smri_proj(smri_feat)
+
+        C1 = self._pcag_attn(Q_f, self.smri_proj_k(smri_feat), self.smri_proj_v(smri_feat),
+                              self.W_e1, self.W_g11, self.W_g12, self.ln_e1, self.ln_g1)
+        C1 = C1 + F.relu(Q_f)
+
+        C2 = self._pcag_attn(Q_s, self.fmri_proj_k(fmri_emb), self.fmri_proj_v(fmri_emb),
+                              self.W_e2, self.W_g21, self.W_g22, self.ln_e2, self.ln_g2)
+        C2 = C2 + F.relu(Q_s)
+
+        w = torch.sigmoid(self.merge_w)
+        out = self.ln_out(w * C1 + (1 - w) * C2)
+
+        return self.classifier(out), torch.tensor(0.0, device=fmri_emb.device)
+
 
 class PCAGModel(nn.Module):
-    def __init__(self, fusion_dim=20, modality='both'):
+    def __init__(self, fusion_dim=20, modality='both', bidir_fusion=False):
         super().__init__()
         self.modality = modality
         self.fmri_encoder = FMRIEncoder()
-        self.pcag = PCAGFusion(fusion_dim=fusion_dim)
+        if bidir_fusion:
+            self.pcag = BidirectionalPCAGFusion(fusion_dim=fusion_dim)
+        else:
+            self.pcag = PCAGFusion(fusion_dim=fusion_dim)
+
     def forward(self, x_node, adj, smri_feat):
         fmri_emb = self.fmri_encoder(x_node, adj)
         if self.modality == 'smri_only':
             fmri_emb = torch.zeros_like(fmri_emb)
         elif self.modality == 'fmri_only':
             smri_feat = torch.zeros_like(smri_feat)
-        return self.pcag(fmri_emb, smri_feat)
+        return self.pcag(fmri_emb, smri_feat)  # returns (logits, align_loss)
 
 # --- Dataset ---
 class PCAGDataset(Dataset):
@@ -180,6 +243,10 @@ def main():
     parser.add_argument("--epochs", type=int, default=200)
     parser.add_argument("--lr", type=float, default=3e-4); parser.add_argument("--fusion_dim", type=int, default=20)
     parser.add_argument("--seed", type=int, default=42); parser.add_argument("--batch_size", type=int, default=16)
+    parser.add_argument("--bidir_fusion", action="store_true", default=False,
+                        help="Use BidirectionalPCAGFusion (Phase-1 upgrade)")
+    parser.add_argument("--align_weight", type=float, default=0.1,
+                        help="Weight for modality alignment loss (bidir_fusion only)")
     parser.add_argument("--ckpt_dir", type=str, default="checkpoints/pcag_combat")
     parser.add_argument("--split_v2", action="store_true", default=True, help="Use v2 splits (more AD in test)")
     parser.add_argument("--modality", default="both", choices=["both", "fmri_only", "smri_only"],
@@ -346,7 +413,8 @@ def main():
         val_loader = DataLoader(PCAGDataset(val_paths, val_smri, val_labels), batch_size=args.batch_size, shuffle=False)
         te_loader = DataLoader(PCAGDataset(df_te['matrix_path'].tolist(), smri_te, df_te['bin_label'].values), batch_size=args.batch_size, shuffle=False)
         
-        model = PCAGModel(fusion_dim=args.fusion_dim, modality=args.modality).to(DEVICE)
+        model = PCAGModel(fusion_dim=args.fusion_dim, modality=args.modality,
+                          bidir_fusion=args.bidir_fusion).to(DEVICE)
         optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=5e-3)
         criterion = nn.CrossEntropyLoss()
         
@@ -369,17 +437,19 @@ def main():
                     adj_mix  = lam * adj  + (1 - lam) * adj[perm]
                     smri_mix = lam * smri + (1 - lam) * smri[perm]
                     y_b = y[perm]
-                    out = model(x_mix, adj_mix, smri_mix)
+                    out, align_loss = model(x_mix, adj_mix, smri_mix)
                     loss = lam * criterion(out, y) + (1 - lam) * criterion(out, y_b)
                 else:
-                    out = model(x, adj, smri)
+                    out, align_loss = model(x, adj, smri)
                     loss = criterion(out, y)
+                if args.bidir_fusion:
+                    loss = loss + args.align_weight * align_loss
                 loss.backward(); optimizer.step()
             
             model.eval(); val_p = []
             with torch.no_grad():
                 for x, adj, smri, y in val_loader:
-                    out = model(x.to(DEVICE), adj.to(DEVICE), smri.to(DEVICE)); val_p.extend(F.softmax(out, dim=1)[:, 1].cpu().numpy())
+                    out, _ = model(x.to(DEVICE), adj.to(DEVICE), smri.to(DEVICE)); val_p.extend(F.softmax(out, dim=1)[:, 1].cpu().numpy())
             
             auc = roc_auc_score(val_labels, val_p) if len(set(val_labels)) > 1 else 0.5
             if auc > best_auc: 
@@ -392,16 +462,17 @@ def main():
         # Save fold checkpoint
         fold_ckpt = CKPT_DIR / f"pcag_combat_{args.task}_fold{fold}.pt"
         torch.save({'model_state': best_state, 'fold': fold, 'task': args.task,
-                    'fusion_dim': args.fusion_dim, 'val_auc': best_auc}, fold_ckpt)
+                    'fusion_dim': args.fusion_dim, 'val_auc': best_auc,
+                    'model_version': 'bidir_v1' if args.bidir_fusion else 'v1'}, fold_ckpt)
         print(f"[SAVED] {fold_ckpt}")
         model.load_state_dict(best_state); model.eval()
         with torch.no_grad():
             fold_p = []; te_p = []
             for x, adj, smri, y in val_loader:
-                out = model(x.to(DEVICE), adj.to(DEVICE), smri.to(DEVICE)); fold_p.extend(F.softmax(out, dim=1)[:, 1].cpu().numpy())
+                out, _ = model(x.to(DEVICE), adj.to(DEVICE), smri.to(DEVICE)); fold_p.extend(F.softmax(out, dim=1)[:, 1].cpu().numpy())
             oof_probs[val_idx] = fold_p
             for x, adj, smri, y in te_loader:
-                out = model(x.to(DEVICE), adj.to(DEVICE), smri.to(DEVICE)); te_p.extend(F.softmax(out, dim=1)[:, 1].cpu().numpy())
+                out, _ = model(x.to(DEVICE), adj.to(DEVICE), smri.to(DEVICE)); te_p.extend(F.softmax(out, dim=1)[:, 1].cpu().numpy())
             test_probs_folds.append(te_p)
 
     # 5. Final Evaluation
