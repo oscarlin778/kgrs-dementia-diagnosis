@@ -84,7 +84,7 @@ def method_a(records, version_label="v2"):
     print("假說：正確分類病患的報告品質 > 錯誤分類病患的報告品質\n")
 
     # 只看 with_rag（更 informative）
-    for judge in ["Gemma3", "Qwen3"]:
+    for judge in ["Gemma3", "Llama3.1"]:
         correct_scores  = defaultdict(list)
         wrong_scores    = defaultdict(list)
         for rec in records:
@@ -116,7 +116,7 @@ def method_a(records, version_label="v2"):
 
     # 同時看 no_rag
     print("  [no_rag 版本作為對照]")
-    for judge in ["Gemma3", "Qwen3"]:
+    for judge in ["Gemma3", "Llama3.1"]:
         correct_scores  = defaultdict(list)
         wrong_scores    = defaultdict(list)
         for rec in records:
@@ -223,7 +223,7 @@ def summarize_llm_judge(records, version_label):
             if isinstance(v, (int, float)):
                 by[judge][f"{cond}/{dim}"].append(v)
 
-    for judge in ["Gemma3", "Qwen3"]:
+    for judge in ["Gemma3", "Llama3.1"]:
         print(f"\n  Judge: {judge}")
         print(f"  {'Dimension':<20} {'With RAG':>9} {'No RAG':>9} {'Δ':>7}  p")
         print(f"  {'-'*55}")

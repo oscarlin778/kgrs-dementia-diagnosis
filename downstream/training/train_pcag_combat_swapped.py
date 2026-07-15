@@ -409,7 +409,8 @@ def main():
                    "architecture": "swapped_qkv (Q=sMRI, K=fMRI, V=fMRI)"}, f, indent=2)
     print(f"\nResults saved to {out_file}")
 
-    prob_path = RES_DIR / f"pcag_combat_swapped_{args.task}_probs_v2{fmri_tag}.npz"
+    _seed_tag = '' if args.seed == 42 else f'_s{args.seed}'
+    prob_path = RES_DIR / f"pcag_combat_swapped_{args.task}_probs_v2{fmri_tag}{_seed_tag}.npz"
     np.savez(str(prob_path),
              test_probs=avg_test_p,
              test_labels=df_te['bin_label'].values,

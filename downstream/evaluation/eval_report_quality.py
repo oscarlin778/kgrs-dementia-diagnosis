@@ -33,15 +33,15 @@ from scipy.stats import wilcoxon
 
 load_dotenv(os.path.join(os.path.dirname(__file__), "../.env"))
 
-BASE_DIR    = Path(__file__).parent
+BASE_DIR    = Path(__file__).parent.parent
 RES_DIR     = BASE_DIR / "results"
 API_BASE    = "http://localhost:8081"
 OLLAMA_URL  = "http://localhost:11434/api/generate"
 
 JUDGES = [
-    {"model": "gemma3:12b",  "label": "Gemma3", "num_predict": 256},
-    # Qwen3 是 thinking model，要留足 reasoning budget
-    {"model": "qwen3.6:35b", "label": "Qwen3",  "num_predict": 4096},
+    {"model": "gemma3:12b",  "label": "Gemma3",   "num_predict": 256},
+    # Cross-family second judge (qwen3.6:35b no longer installed); Llama3.1-8B is available.
+    {"model": "llama3.1:8b", "label": "Llama3.1", "num_predict": 256},
 ]
 
 LABEL_MAP  = {0: "NC", 1: "MCI", 2: "AD"}

@@ -30,16 +30,25 @@ except Exception as e:
     _GRAPH_AVAILABLE = False
 
 # 初始化 Vector 驅動 (使用本地 Ollama)
+# RAG_EMBED=bge (default) → bge-m3 + chunk_bge_index (stronger retrieval, English corpus);
+# RAG_EMBED=nomic → original nomic-embed-text + chunk_embedding_index (rollback).
+_EMBED_CFG = {
+    "bge":   ("bge-m3",          "chunk_bge_index"),
+    "nomic": ("nomic-embed-text", "chunk_embedding_index"),
+}
+_embed_choice = os.getenv("RAG_EMBED", "bge").lower()
+_embed_model, _embed_index = _EMBED_CFG.get(_embed_choice, _EMBED_CFG["bge"])
 try:
-    embeddings = OllamaEmbeddings(model="nomic-embed-text")
+    embeddings = OllamaEmbeddings(model=_embed_model)
     vector_store = Neo4jVector.from_existing_index(
         embedding=embeddings,
         url=NEO4J_URI,
         username=NEO4J_USER,
         password=NEO4J_PASSWORD,
-        index_name="chunk_embedding_index", # 剛剛驗證成功的索引名稱
+        index_name=_embed_index,
         text_node_property="text"
     )
+    print(f"[RAG] vector store: {_embed_model} / {_embed_index}")
 except Exception as e:
     print(f"⚠️  Ollama/Vector Index 連線失敗，文獻檢索功能將無法使用: {e}")
     embeddings = None
@@ -133,8 +142,22 @@ def retrieve_medical_literature(patient_ctx: str, top_roi_names: list, query: st
         return "無法取得文獻支援。", []
 
     if query is None:
-        roi_str = "、".join(top_roi_names[:3]) if top_roi_names else "大腦功能性連結"
-        query = f"探討 {patient_ctx} 的病患，其 {roi_str} 異常的臨床意義、認知儲備代償效應與預後發展。"
+        # The literature corpus is in English; build an English biomedical query
+        # so retrieval is not degraded by cross-lingual mismatch (a Chinese query
+        # against English-embedded chunks retrieved markedly less relevant papers).
+        _DIAG_EN = {
+            "NC": "normal cognition", "MCI": "mild cognitive impairment",
+            "AD": "Alzheimer's disease",
+            "正常": "normal cognition", "輕度認知障礙": "mild cognitive impairment",
+            "阿茲海默": "Alzheimer's disease",
+        }
+        diag_en = _DIAG_EN.get(str(patient_ctx).strip(), str(patient_ctx))
+        roi_str = ", ".join(top_roi_names[:5]) if top_roi_names else "resting-state functional connectivity"
+        query = (
+            f"Clinical significance of {roi_str} abnormalities in {diag_en}: "
+            f"resting-state functional connectivity, structural atrophy, "
+            f"default mode network, cognitive reserve, biomarkers, and disease progression."
+        )
 
     print(f"  🔍 [Vector Search] 正在檢索相關文獻（MMR, k=5）...")
 
@@ -166,7 +189,9 @@ def retrieve_medical_literature(patient_ctx: str, top_roi_names: list, query: st
     for i, doc in enumerate(results, 1):
         title = doc.metadata.get('title', f'Reference Paper {i}')
         text = doc.page_content.replace('\n', ' ')
-        literature_context += f"--- 文獻資料來源《{title}》---\n{text}\n\n"
+        # Numbered references so the generator can cite by [i] and stay grounded
+        # in the retrieved set (discourages parametric / hallucinated citations).
+        literature_context += f"[{i}] 《{title}》\n{text}\n\n"
         citations.append({
             "id": i,
             "title": title,
@@ -175,10 +200,12 @@ def retrieve_medical_literature(patient_ctx: str, top_roi_names: list, query: st
 
     return literature_context, citations
 
+# English prefixes: the literature corpus is English, so queries must be English
+# to avoid cross-lingual retrieval degradation.
 _CLASS_QUERY_PREFIX = {
-    "AD":  "阿茲海默症患者大腦萎縮、功能斷連、神經炎性斑塊",
-    "MCI": "輕度認知障礙早期生物標記、代償機制、轉換風險",
-    "NC":  "正常老化神經保護因子、認知儲備、健康功能連結",
+    "AD":  "Alzheimer's disease brain atrophy, functional disconnection, amyloid pathology and neuroinflammation.",
+    "MCI": "mild cognitive impairment early biomarkers, compensatory mechanisms, and conversion-to-AD risk.",
+    "NC":  "normal aging neuroprotective factors, cognitive reserve, and healthy functional connectivity.",
 }
 
 # ==========================================
@@ -244,11 +271,12 @@ def retrieve_multimodal(fmri_findings: dict, smri_findings: dict, patient_ctx: s
     # fMRI Retrieval
     if fmri_findings:
         roi_names = [r["name"] for r in fmri_findings.get("top_regions", [])[:3]]
-        roi_str = "、".join(roi_names) if roi_names else "大腦功能性連結"
+        roi_str = ", ".join(roi_names) if roi_names else "resting-state functional connectivity"
         fmri_query = (
-            f"{prefix}患者預測傾向 {predicted_class or '認知障礙'}，"
-            f"大腦功能性連結在 {roi_str} 區域有顯著模型關注。"
-            f"這些腦區在失智症進展中的臨床意義、神經機制與預後相關生物標記。"
+            f"{prefix} Patient predicted as {predicted_class or 'cognitive impairment'}. "
+            f"Resting-state functional connectivity shows salient model attention in {roi_str}. "
+            f"Clinical significance, neural mechanisms, and prognostic biomarkers of these "
+            f"brain regions in dementia progression."
         )
         ctx, cits = retrieve_medical_literature(patient_ctx, roi_names, query=fmri_query)
         if ctx:
@@ -261,11 +289,12 @@ def retrieve_multimodal(fmri_findings: dict, smri_findings: dict, patient_ctx: s
     # sMRI Retrieval
     if smri_findings:
         atrophy_regions = smri_findings.get("atrophy_regions", [])
-        atrophy_str = "、".join(atrophy_regions) if atrophy_regions else "腦部結構"
+        atrophy_str = ", ".join(atrophy_regions) if atrophy_regions else "brain structure"
         smri_query = (
-            f"{prefix}患者預測傾向 {predicted_class or '認知障礙'}，"
-            f"sMRI 結構性影像在 {atrophy_str} 區域具有模型關注。"
-            f"相關腦部結構異常作為失智症早期生物標記的證據，以及與認知衰退的關聯。"
+            f"{prefix} Patient predicted as {predicted_class or 'cognitive impairment'}. "
+            f"Structural MRI shows model attention in {atrophy_str}. "
+            f"Evidence for these structural abnormalities as early dementia biomarkers "
+            f"and their association with cognitive decline."
         )
         ctx, cits = retrieve_medical_literature(patient_ctx, atrophy_regions, query=smri_query)
         if ctx:

@@ -25,7 +25,7 @@ from inference_pipeline_v2 import (
     extract_node_features, build_adj, DEVICE,
 )
 
-BASE_DIR = Path(__file__).parent
+BASE_DIR = Path(__file__).parent.parent
 RES_DIR  = BASE_DIR / "results"
 CSV_PATH = BASE_DIR / "pcag_test_aligned_v2.csv"
 SMRI_PKL = BASE_DIR / "sid_to_smri_feat.pkl"
@@ -49,18 +49,16 @@ else:
 
 # Per-task ckpt dir naming（須與 train script 的 exp_tag 對齊）
 # seed=42 不加 _s 後綴；其他加 _s{seed}
-def get_ckpt_dirs(task: str, variant: str) -> list:
-    dirs = []
-    for s in SEEDS:
-        s_tag = "" if s == 42 else f"_s{s}"
-        if variant == "aug":
-            name = f"pcag_ensemble_aug_v2_fmricombat_nolabel_aug_mix0.2_de0.2{s_tag}"
-        elif variant == "noaug":
-            name = f"pcag_ensemble_noaug_v2_fmricombat_nolabel{s_tag}"
-        else:
-            raise ValueError(variant)
-        dirs.append(CKPT_ROOT / name)
-    return dirs
+# Per-task ckpt base names — MUST match the locked-cohort train script exp_tag
+# (origfit reference-transfer harmonization, copied to the _nolabel naming).
+_TASK_CKPT_BASE = {
+    "NC_vs_AD":  "pcag_combat_v2_fmricombat_nolabel_aug_mix0.2_de0.2",
+    "NC_vs_MCI": "pcag_combat_v2_fmricombat_nolabel_dim128",
+    "MCI_vs_AD": "pcag_combat_v2_fmricombat_nolabel",
+}
+def get_ckpt_dirs(task: str, variant: str = None) -> list:
+    base = _TASK_CKPT_BASE[task]
+    return [CKPT_ROOT / f"{base}{'' if s == 42 else f'_s{s}'}" for s in SEEDS]
 
 
 TASK_VARIANTS = {

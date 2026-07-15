@@ -14,6 +14,10 @@ export default defineConfig({
         target: 'http://localhost:8082',
         changeOrigin: true,
       },
+      '/static_model': {
+        target: 'http://localhost:8082',
+        changeOrigin: true,
+      },
       '/static_saliency': {
         target: 'http://localhost:8082',
         changeOrigin: true,

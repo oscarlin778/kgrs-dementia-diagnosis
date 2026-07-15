@@ -61,7 +61,16 @@ def run_adni_extraction():
             nii_path = os.path.join(fmri_dir, nii_files[0])
             out_npy_name = f"sub-{subj}_matrix_clean_116.npy"
             out_npy_path = os.path.join(OUTPUT_MATRICES_DIR, out_npy_name)
-            
+
+            # Skip subjects already processed (protect the existing cohort's matrices);
+            # still record them in the index so the CSV stays complete.
+            if os.path.exists(out_npy_path):
+                valid_records.append({
+                    'subject_id': f"sub-{subj}", 'matrix_path': out_npy_path,
+                    'diagnosis': group, 'label': label_mapping[group]})
+                print(f"  ⏩ {subj} ({group}) 已存在，跳過")
+                continue
+
             try:
                 # 1. 萃取時間序列
                 time_series = masker.fit_transform(nii_path)

@@ -17,34 +17,30 @@ def build_diagnosis_dict(csv_path):
     print(f"📖 正在讀取臨床數據: {csv_path}")
     # ADNI 的 CSV 常有引號，用 pandas 處理
     df = pd.read_csv(csv_path, quotechar='"', skipinitialspace=True)
-    
+
     # 清理欄位名稱（移除可能存在的空格或隱藏字元）
     df.columns = [c.strip().upper() for c in df.columns]
-    
-    # 篩選 Baseline 資料
-    baseline_df = df[df['VISCODE'].isin(['bl', 'm00', 'v01'])]
-    
+
+    # Phase-agnostic baseline：取每位受試者「最早有效診斷」。
+    # 舊版只收 VISCODE in {bl,m00,v01} 會漏掉 ADNI-4 的 4_bl/4_sc 等編碼。
+    df = df[df['DIAGNOSIS'].notna()].copy()
+    df['EXAMDATE'] = pd.to_datetime(df.get('EXAMDATE'), errors='coerce')
+    df = df.sort_values('EXAMDATE')  # 最早的在前
+
+    MAP = {1: 'NC', 2: 'MCI', 3: 'AD'}
     diag_dict = {}
-    
-    # 遍歷每一行，根據 DIAGNOSIS 數字進行分類
-    for _, row in baseline_df.iterrows():
+    for _, row in df.iterrows():
         ptid = str(row['PTID']).strip()
-        
+        if ptid in diag_dict:      # 已記錄最早診斷，跳過後續 visit
+            continue
         try:
-            dx_val = int(row['DIAGNOSIS'])
-            if dx_val == 1:
-                dx = 'NC'
-            elif dx_val == 2:
-                dx = 'MCI'
-            elif dx_val == 3:
-                dx = 'AD'
-            else:
-                continue
-            diag_dict[ptid] = dx
+            dx = MAP.get(int(row['DIAGNOSIS']))
         except (ValueError, TypeError):
             continue
-            
-    print(f"✅ 成功載入 {len(diag_dict)} 筆 Baseline 診斷紀錄。")
+        if dx:
+            diag_dict[ptid] = dx
+
+    print(f"✅ 成功載入 {len(diag_dict)} 筆診斷紀錄（每人最早有效診斷）。")
     return diag_dict
 
 # ==========================================

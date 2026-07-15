@@ -255,7 +255,8 @@ def main():
         json.dump({"oof_auc": float(oof_auc), "test_metrics": metrics}, f, indent=2)
     print(f"\n[SAVED] {out_file}")
 
-    np.savez(str(RES_DIR / f"concat_{args.task}_probs_v2{fmri_tag}.npz"),
+    _seed_tag = '' if args.seed == 42 else f'_s{args.seed}'
+    np.savez(str(RES_DIR / f"concat_{args.task}_probs_v2{fmri_tag}{_seed_tag}.npz"),
              test_probs=avg_test_p, test_labels=df_te['bin_label'].values,
              oof_probs=oof_probs, oof_labels=df_tr['bin_label'].values)
 

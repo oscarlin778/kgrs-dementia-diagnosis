@@ -207,14 +207,14 @@ class BidirectionalPCAGFusion(nn.Module):
 
 
 class PCAGModel(nn.Module):
-    def __init__(self, fusion_dim=20, modality='both', bidir_fusion=False):
+    def __init__(self, fusion_dim=20, modality='both', bidir_fusion=False, num_classes=2):
         super().__init__()
         self.modality = modality
         self.fmri_encoder = FMRIEncoder()
         if bidir_fusion:
-            self.pcag = BidirectionalPCAGFusion(fusion_dim=fusion_dim)
+            self.pcag = BidirectionalPCAGFusion(fusion_dim=fusion_dim, num_classes=num_classes)
         else:
-            self.pcag = PCAGFusion(fusion_dim=fusion_dim)
+            self.pcag = PCAGFusion(fusion_dim=fusion_dim, num_classes=num_classes)
 
     def forward(self, x_node, adj, smri_feat):
         fmri_emb = self.fmri_encoder(x_node, adj)
@@ -239,7 +239,7 @@ class PCAGDataset(Dataset):
 # --- Main Training Script ---
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--task", default="NC_vs_MCI", choices=["NC_vs_AD", "NC_vs_MCI", "MCI_vs_AD"])
+    parser.add_argument("--task", default="NC_vs_MCI", choices=["NC_vs_AD", "NC_vs_MCI", "MCI_vs_AD", "3class"])
     parser.add_argument("--epochs", type=int, default=200)
     parser.add_argument("--lr", type=float, default=3e-4); parser.add_argument("--fusion_dim", type=int, default=20)
     parser.add_argument("--seed", type=int, default=42); parser.add_argument("--batch_size", type=int, default=16)
@@ -287,9 +287,7 @@ def main():
     mod_tag    = "" if args.modality == "both" else f"_{args.modality}"
     combat_tag = "_no_combat" if args.no_combat else ""
     if args.fmri_harmonized:
-        if args.fmri_combat_dir and "covbat" in args.fmri_combat_dir:
-            fmri_tag = "_covbat_nolabel"
-        elif args.fmri_combat_dir and "nolabel" in args.fmri_combat_dir:
+        if args.fmri_combat_dir and "nolabel" in args.fmri_combat_dir:
             fmri_tag = "_fmricombat_nolabel"
         elif args.fmri_combat_dir and args.fmri_combat_dir != "fmri_combat_v2":
             fmri_tag = "_fmricombat_taskspecific"
@@ -317,6 +315,7 @@ def main():
         'NC_vs_AD':  {'classes': [0, 2], 'pos': 2},
         'NC_vs_MCI': {'classes': [0, 1], 'pos': 1},
         'MCI_vs_AD': {'classes': [1, 2], 'pos': 2},
+        '3class':    {'classes': [0, 1, 2], 'pos': None},
     }
     cfg = TASK_CFG[args.task]
 
@@ -329,10 +328,10 @@ def main():
     _site = lambda sid: 'ADNI_new' if _re.search(r'\d{3}_S_\d{4}', str(sid)) else 'TPMIC'
     df_tr['source'] = df_tr['subject_id'].apply(_site)
     df_te['source'] = df_te['subject_id'].apply(_site)
-    df_tr = df_tr[df_tr['label'].isin(cfg['classes'])].reset_index(drop=True)
-    df_tr['bin_label'] = (df_tr['label'] == cfg['pos']).astype(int)
-    df_te = df_te[df_te['label'].isin(cfg['classes'])].reset_index(drop=True)
-    df_te['bin_label'] = (df_te['label'] == cfg['pos']).astype(int)
+    df_tr = df_tr.reset_index(drop=True)
+    df_tr['bin_label'] = df_tr['label'].astype(int)   # 3-class: 0=NC,1=MCI,2=AD
+    df_te = df_te.reset_index(drop=True)
+    df_te['bin_label'] = df_te['label'].astype(int)
 
     # Learning-curve: subsample positive-class (AD for MCI_vs_AD) training subjects to N.
     if args.subsample_ad is not None:
@@ -429,7 +428,7 @@ def main():
 
     # 4. 5-Fold CV
     skf = StratifiedKFold(n_splits=5, shuffle=True, random_state=args.seed)
-    oof_probs = np.zeros(len(df_tr)); test_probs_folds = []
+    oof_probs = np.zeros((len(df_tr),3)); test_probs_folds = []
     for fold, (tr_idx, val_idx) in enumerate(skf.split(df_tr, df_tr['bin_label'])):
         print(f"\n--- Fold {fold+1}/5 ---")
         tr_paths, tr_smri, tr_labels = df_tr.iloc[tr_idx]['matrix_path'].tolist(), smri_tr[tr_idx], df_tr.iloc[tr_idx]['bin_label'].values
@@ -444,7 +443,7 @@ def main():
         te_loader = DataLoader(PCAGDataset(df_te['matrix_path'].tolist(), smri_te, df_te['bin_label'].values), batch_size=args.batch_size, shuffle=False)
         
         model = PCAGModel(fusion_dim=args.fusion_dim, modality=args.modality,
-                          bidir_fusion=args.bidir_fusion).to(DEVICE)
+                          bidir_fusion=args.bidir_fusion, num_classes=3).to(DEVICE)
         optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=5e-3)
         criterion = nn.CrossEntropyLoss()
         
@@ -479,9 +478,9 @@ def main():
             model.eval(); val_p = []
             with torch.no_grad():
                 for x, adj, smri, y in val_loader:
-                    out, _ = model(x.to(DEVICE), adj.to(DEVICE), smri.to(DEVICE)); val_p.extend(F.softmax(out, dim=1)[:, 1].cpu().numpy())
+                    out, _ = model(x.to(DEVICE), adj.to(DEVICE), smri.to(DEVICE)); val_p.extend(F.softmax(out, dim=1).cpu().numpy())
             
-            auc = roc_auc_score(val_labels, val_p) if len(set(val_labels)) > 1 else 0.5
+            auc = roc_auc_score(val_labels, np.array(val_p), multi_class='ovo', labels=[0,1,2]) if len(set(val_labels))>2 else 0.5
             if auc > best_auc: 
                 best_auc = auc; best_state = {k: v.cpu().clone() for k, v in model.state_dict().items()}; patience_counter = 0
             else:
@@ -499,31 +498,34 @@ def main():
         with torch.no_grad():
             fold_p = []; te_p = []
             for x, adj, smri, y in val_loader:
-                out, _ = model(x.to(DEVICE), adj.to(DEVICE), smri.to(DEVICE)); fold_p.extend(F.softmax(out, dim=1)[:, 1].cpu().numpy())
-            oof_probs[val_idx] = fold_p
+                out, _ = model(x.to(DEVICE), adj.to(DEVICE), smri.to(DEVICE)); fold_p.extend(F.softmax(out, dim=1).cpu().numpy())
+            oof_probs[val_idx] = np.array(fold_p)
             for x, adj, smri, y in te_loader:
-                out, _ = model(x.to(DEVICE), adj.to(DEVICE), smri.to(DEVICE)); te_p.extend(F.softmax(out, dim=1)[:, 1].cpu().numpy())
+                out, _ = model(x.to(DEVICE), adj.to(DEVICE), smri.to(DEVICE)); te_p.extend(F.softmax(out, dim=1).cpu().numpy())
             test_probs_folds.append(te_p)
 
-    # 5. Final Evaluation
-    oof_auc = roc_auc_score(df_tr['bin_label'], oof_probs)
-    print(f"\nFinal OOF AUC: {oof_auc:.4f}")
-    from sklearn.metrics import roc_curve
-    fpr, tpr, thresholds = roc_curve(df_tr['bin_label'], oof_probs)
-    best_thresh = thresholds[np.argmax(tpr - fpr)]
-    
-    avg_test_p = np.mean(test_probs_folds, axis=0)
-    test_auc = roc_auc_score(df_te['bin_label'], avg_test_p)
-    test_pred = (avg_test_p >= best_thresh).astype(int)
-    cm = confusion_matrix(df_te['bin_label'], test_pred)
-    tn, fp, fn, tp = cm.ravel()
-    
+    # 5. Final Evaluation (3-class)
+    from sklearn.metrics import balanced_accuracy_score
+    yt = df_te['bin_label'].values
+    oof_auc = roc_auc_score(df_tr['bin_label'], oof_probs, multi_class='ovo', labels=[0,1,2])
+    print(f"\nFinal OOF macro-OVO AUC: {oof_auc:.4f}")
+    avg_test_p = np.mean(test_probs_folds, axis=0)   # (n,3)
+    test_auc = roc_auc_score(yt, avg_test_p, multi_class='ovo', labels=[0,1,2])
+    test_pred = avg_test_p.argmax(1)
+    cm = confusion_matrix(yt, test_pred, labels=[0,1,2])
+    # pairwise AUC (comparable to OVO binary / ADMGCN)
+    names={0:'NC',1:'MCI',2:'AD'}; pair={}
+    for i,j in [(0,2),(0,1),(1,2)]:
+        m=(yt==i)|(yt==j)
+        if m.sum()>0 and len(set(yt[m]))==2:
+            sc=avg_test_p[m,j]/(avg_test_p[m,i]+avg_test_p[m,j]+1e-9)
+            pair[f'{names[i]}_vs_{names[j]}']=float(roc_auc_score((yt[m]==j).astype(int),sc))
     metrics = {
-        "auc": float(test_auc), "threshold": float(best_thresh),
-        "sens": float(tp / (tp + fn)) if (tp+fn)>0 else 0,
-        "spec": float(tn / (tn + fp)) if (tn+fp)>0 else 0,
-        "f1": float(f1_score(df_te['bin_label'], test_pred)),
-        "acc": float(accuracy_score(df_te['bin_label'], test_pred)),
+        "macro_ovo_auc": float(test_auc),
+        "balanced_acc": float(balanced_accuracy_score(yt, test_pred)),
+        "accuracy": float(accuracy_score(yt, test_pred)),
+        "macro_f1": float(f1_score(yt, test_pred, average='macro')),
+        "pairwise_auc": pair,
         "cm": cm.tolist()
     }
     print(f"\nCombat-Harmonized PCAG Test Metrics ({args.task}):")

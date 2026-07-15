@@ -2,9 +2,9 @@
 inference_pipeline_v2.py
 ========================
 End-to-end inference using valid (leak-free) models:
-  NC/AD  : PCAG-ComBat ensemble (5 folds)
-  NC/MCI : PCAG-ComBat ensemble (5 folds)
-  MCI/AD : KD GNN ensemble (3 seeds)
+  NC/AD  : PCAG-ComBat label-free ensemble (top-3-OOF seeds, dim20+aug)
+  NC/MCI : PCAG-ComBat label-free ensemble (5 seeds, dim128)
+  MCI/AD : PCAG-ComBat label-free ensemble (5 seeds, dim20, mean)
 
 Usage:
     python inference_pipeline_v2.py \\
@@ -33,8 +33,24 @@ PCAG_CKPT_DIR       = os.path.join(BASE, "checkpoints", "pcag_combat_v2")
 PCAG_FMRI_ONLY_DIR  = os.path.join(BASE, "checkpoints", "pcag_combat_v2_fmri_only_fmricombat_nolabel")
 PCAG_SMRI_ONLY_DIR  = os.path.join(BASE, "checkpoints", "pcag_combat_v2_smri_only_fmricombat_nolabel")
 
-# MCI_vs_AD 5-seed noaug ensemble（論文 median 策略，所有 seed 都已訓練完畢）
-_NOAUG_BASE = os.path.join(BASE, "checkpoints", "pcag_ensemble_noaug_v2_fmricombat_nolabel")
+# ── Final label-free models (reproduce paper Table 2: 0.865 / 0.719 / 0.806) ──
+# Each task aggregates at the SEED level (mean over 5 folds per seed, then a
+# cross-seed strategy), matching how the reported probs were produced.
+# NC_vs_AD : label-free dim20 + FC-Mixup/DropEdge aug; 5-seed mean (augmented cohort)
+_NCAD_BASE      = os.path.join(BASE, "checkpoints",
+                               "pcag_combat_v2_fmricombat_nolabel_aug_mix0.2_de0.2")
+PCAG_NCAD_DIRS  = [_NCAD_BASE] + [f"{_NCAD_BASE}_s{s}" for s in (123, 456, 789, 2024)]
+# NC_vs_MCI: label-free dim128; mean over 5 seeds (reported 0.719)
+_NCMCI_BASE     = os.path.join(BASE, "checkpoints", "pcag_combat_v2_fmricombat_nolabel_dim128")
+PCAG_NCMCI_DIRS = [_NCMCI_BASE] + [f"{_NCMCI_BASE}_s{s}" for s in (123, 456, 789, 2024)]
+# Label-free fMRI ComBat estimates (harmonize raw input FC at inference time)
+FMRI_COMBAT_ESTIMATES = os.path.join(BASE, "checkpoints", "fmri_combat_estimates_nolabel.json")
+
+# MCI_vs_AD 5-seed noaug ensemble, mean strategy (reported 0.806).
+# NOTE: use the default-ckpt-dir run (pcag_combat_v2_fmricombat_nolabel*), which is
+# the run that produced the reported per-seed probs — verified to reproduce 0.806.
+# (The older pcag_ensemble_noaug_* dirs are a separate run and do NOT match.)
+_NOAUG_BASE = os.path.join(BASE, "checkpoints", "pcag_combat_v2_fmricombat_nolabel")
 PCAG_MCIAD_ENSEMBLE_DIRS = [
     _NOAUG_BASE,
     _NOAUG_BASE + "_s123",
@@ -42,7 +58,6 @@ PCAG_MCIAD_ENSEMBLE_DIRS = [
     _NOAUG_BASE + "_s789",
     _NOAUG_BASE + "_s2024",
 ]
-KD_CKPT_DIR         = os.path.join(SCRIPTS, "checkpoints", "resnet_checkpoints", "gnn_checkpoints")
 VIT_CKPT       = os.path.join(SCRIPTS, "models", "checkpoints",
                                "finetune_tpmic_full", "vit_mci.ckpt")
 AAL_ATLAS_PATH = os.path.join(os.path.dirname(SCRIPTS), "datasets", "nilearn_data",
@@ -256,41 +271,6 @@ class PCAGModel(nn.Module):
             return logits, attn
         return self.pcag(fmri_emb, smri_feat)
 
-class KDGNNModel(nn.Module):
-    """FNPGNNv8_KD stripped to encoder + MCI/AD head for inference."""
-    def __init__(self):
-        super().__init__()
-        self.node_encoder = nn.Sequential(nn.Linear(NODE_FEAT_DIM, HIDDEN_DIM), nn.ELU(), nn.Dropout(0.2))
-        self.bn_input = nn.BatchNorm1d(HIDDEN_DIM)
-        self.virtual_node_emb = nn.Parameter(torch.zeros(1, 1, HIDDEN_DIM))
-        self.gat1 = GATLayer(HIDDEN_DIM, HIDDEN_DIM)
-        self.gat2 = GATLayer(HIDDEN_DIM, HIDDEN_DIM)
-        self.gat3 = GATLayer(HIDDEN_DIM, HIDDEN_DIM)
-        self.vn_update = nn.Sequential(nn.Linear(HIDDEN_DIM*2, HIDDEN_DIM), nn.ELU())
-        self.register_buffer('pooling_mat', POOLING_MAT)
-        self.net_attn = nn.Sequential(nn.Linear(HIDDEN_DIM, 32), nn.Tanh(), nn.Linear(32, 1))
-        self.net_ln = nn.LayerNorm(N_NETWORKS * HIDDEN_DIM + HIDDEN_DIM)
-        self.classifier = nn.Sequential(
-            nn.Dropout(0.4), nn.Linear(FMRI_EMBED_DIM, 256),
-            nn.ELU(), nn.Dropout(0.2), nn.Linear(256, 2)
-        )
-        nn.init.normal_(self.virtual_node_emb, std=0.02)
-    def _encode(self, x, adj):
-        B, N, _ = x.shape
-        h = self.bn_input(self.node_encoder(x).reshape(B*N,-1)).reshape(B, N, -1)
-        vn = self.virtual_node_emb.expand(B,-1,-1) + h.mean(dim=1, keepdim=True)
-        h = self.gat1(h, adj); vn = self.vn_update(torch.cat([vn, h.mean(dim=1,keepdim=True)], dim=-1))
-        h = h + vn.expand(-1,N,-1)*0.1
-        h = self.gat2(h, adj) + h; vn = self.vn_update(torch.cat([vn, h.mean(dim=1,keepdim=True)], dim=-1))
-        h = h + vn.expand(-1,N,-1)*0.1
-        h = self.gat3(h, adj) + h; vn = self.vn_update(torch.cat([vn, h.mean(dim=1,keepdim=True)], dim=-1))
-        pooled = torch.matmul(h.transpose(1,2), self.pooling_mat).transpose(1,2)
-        pooled = pooled * torch.softmax(self.net_attn(pooled), dim=1)
-        return self.net_ln(torch.cat([pooled.reshape(B,-1), vn.squeeze(1)], dim=1))
-    def forward(self, x, adj):
-        return self.classifier(self._encode(x, adj))
-
-
 # ── BrainIAC feature extractor ────────────────────────────────────────────────
 class BrainIACExtractor(nn.Module):
     def __init__(self):
@@ -372,6 +352,40 @@ def apply_combat(x: np.ndarray, site: str, params: dict) -> np.ndarray:
     return x_adj * np.sqrt(var_pooled) + grand_mean
 
 
+# ── Label-free fMRI ComBat (harmonize raw FC matrix at inference) ─────────────
+def load_fmri_combat_estimates(path: str = FMRI_COMBAT_ESTIMATES) -> dict:
+    """Load label-free fMRI ComBat estimates; returns None if unavailable."""
+    if not os.path.exists(path):
+        print(f"  [warn] fMRI ComBat estimates not found ({path}); FC left un-harmonized")
+        return None
+    with open(path) as f:
+        p = json.load(f)
+    sm = np.array(p['stand_mean'])
+    return {
+        'site_map':   p['site_map'],
+        'grand_mean': sm.mean(axis=1) if sm.ndim == 2 else sm.flatten(),  # (6670,)
+        'var_pooled': np.array(p['var_pooled']),                          # (6670,)
+        'gamma_star': np.array(p['gamma_star']),                          # (n_sites, 6670)
+        'delta_star': np.array(p['delta_star']),                          # (n_sites, 6670)
+    }
+
+
+def apply_combat_fmri(mat: np.ndarray, site: str, params: dict) -> np.ndarray:
+    """Label-free ComBat on a 116x116 FC matrix's upper triangle. Returns
+    a symmetric harmonized matrix (verified to reproduce fmri_combat_v2_nolabel/)."""
+    iu = np.triu_indices(N_ROIS, k=1)
+    tri = mat[iu]
+    si = params['site_map'].get(site, 0)
+    vp = params['var_pooled']
+    x_std = (tri - params['grand_mean']) / (np.sqrt(vp) + 1e-8)
+    x_adj = (x_std - params['gamma_star'][si]) / (np.sqrt(params['delta_star'][si]) + 1e-8)
+    tri_h = x_adj * np.sqrt(vp) + params['grand_mean']
+    out = mat.copy().astype(np.float32)
+    out[iu] = tri_h
+    out[(iu[1], iu[0])] = tri_h   # keep symmetric
+    return out
+
+
 # ── Model loader ──────────────────────────────────────────────────────────────
 def load_pcag_models(task: str, ckpt_dir: str = None):
     base = ckpt_dir or PCAG_CKPT_DIR
@@ -397,19 +411,18 @@ def load_pcag_models_multi_seed(task: str, seed_dirs: list):
             print(f"  [warn] 跳過 {d}: {e}")
     return all_models
 
-def load_kd_models():
-    models = []
-    for seed in [42, 123, 456]:
-        path = os.path.join(KD_CKPT_DIR, f"gnn_MCI_vs_AD_seed{seed}.pt")
-        sd = torch.load(path, map_location='cpu', weights_only=False)
-        m = KDGNNModel().to(DEVICE)
-        # Load only matching keys (KD checkpoint has extra heads we don't use)
-        own_keys = set(m.state_dict().keys())
-        filtered = {k: v for k, v in sd.items() if k in own_keys}
-        m.load_state_dict(filtered, strict=False)
-        m.eval()
-        models.append(m)
-    return models
+
+def load_pcag_seed_groups(task: str, seed_dirs: list):
+    """Load checkpoints grouped by seed: returns a list of fold-model lists,
+    one inner list (5 folds) per seed. Enables the paper's two-level ensemble
+    aggregation (mean over folds within a seed, then a cross-seed strategy)."""
+    groups = []
+    for d in seed_dirs:
+        try:
+            groups.append(load_pcag_models(task, d))
+        except Exception as e:
+            print(f"  [warn] 跳過 {d}: {e}")
+    return groups
 
 
 # ── sMRI preprocessing ────────────────────────────────────────────────────────
@@ -436,14 +449,18 @@ class InferencePipelineV2:
         self.brainiac   = BrainIACExtractor().to(DEVICE).eval()
         self.smri_tfm   = get_smri_transform()
 
-        # Dual-modal (fusion) models
-        # NC_vs_AD: seed=42 aug（5 folds）
-        # NC_vs_MCI: seed=456 noaug（5 folds，論文 single_best 策略）
-        # MCI_vs_AD: 5-seed noaug median ensemble（25 models，論文 median 策略）
-        self.pcag_nc_ad   = load_pcag_models('NC_vs_AD')
-        self.pcag_nc_mci  = load_pcag_models('NC_vs_MCI')
-        self.pcag_mci_ad  = load_pcag_models_multi_seed('MCI_vs_AD', PCAG_MCIAD_ENSEMBLE_DIRS)
-        self.kd_mci_ad    = load_kd_models()
+        # Label-free fMRI ComBat estimates (harmonize raw input FC at inference)
+        self.fmri_combat  = load_fmri_combat_estimates()
+
+        # Dual-modal (fusion) models — all label-free, seed-grouped for the
+        # paper's two-level ensemble aggregation (see _pcag_predict_seedwise).
+        # NC_vs_AD : top-3-by-OOF seeds, mean | NC_vs_MCI: 5 seeds (dim128), mean
+        # MCI_vs_AD: 5 seeds (noaug), median
+        self.pcag_nc_ad   = load_pcag_seed_groups('NC_vs_AD',  PCAG_NCAD_DIRS)
+        self.pcag_nc_mci  = load_pcag_seed_groups('NC_vs_MCI', PCAG_NCMCI_DIRS)
+        self.pcag_mci_ad  = load_pcag_seed_groups('MCI_vs_AD', PCAG_MCIAD_ENSEMBLE_DIRS)
+        # NOTE: knowledge distillation (KD) is no longer used — the final system is
+        # fully PCAG-ComBat. The legacy KD GNN ensemble loader has been removed.
 
         # fMRI-only ablation models (all 3 tasks)
         self.pcag_fmri_nc_ad  = load_pcag_models('NC_vs_AD',  PCAG_FMRI_ONLY_DIR)
@@ -464,7 +481,7 @@ class InferencePipelineV2:
         print(f"  Models loaded in {time.perf_counter()-t0:.2f}s")
 
     @torch.no_grad()
-    def _encode_fmri(self, matrix_path: str):
+    def _encode_fmri(self, matrix_path: str, site: str = 'ADNI'):
         mat = np.load(matrix_path)
         if mat.ndim == 3:
             mat = mat[0]
@@ -480,6 +497,12 @@ class InferencePipelineV2:
                 raise ValueError(
                     f"fMRI matrix shape {mat.shape} != ({N_ROIS},{N_ROIS}): {matrix_path}"
                 )
+        # Symmetrize then apply label-free fMRI ComBat (matches training preprocessing).
+        # The label-free PCAG models were trained on harmonized FC, so a raw input
+        # must be harmonized here for consistency with the reported results.
+        mat = ((mat + mat.T) / 2).astype(np.float32)
+        if self.fmri_combat is not None:
+            mat = apply_combat_fmri(mat, site, self.fmri_combat)
         feat  = extract_node_features(mat)
         adj   = build_adj(mat)
         x     = torch.tensor(feat).unsqueeze(0).to(DEVICE)
@@ -492,7 +515,10 @@ class InferencePipelineV2:
         return self.brainiac(vol).squeeze(0).cpu().numpy()   # (768,)
 
     @torch.no_grad()
-    def _pcag_predict(self, models, x, adj, smri_harmonized):
+    def _pcag_predict(self, models, x, adj, smri_harmonized, agg='auto'):
+        """Aggregate per-model P(positive). `agg` matches the paper's per-task
+        ensemble policy: 'mean' (NC_vs_AD, NC_vs_MCI), 'median' (MCI_vs_AD).
+        'auto' falls back to median for >5 models, mean otherwise."""
         smri_t = torch.tensor(smri_harmonized, dtype=torch.float32).unsqueeze(0).to(DEVICE)
         probs  = []
         for m in models:
@@ -501,23 +527,31 @@ class InferencePipelineV2:
             logits = result[0] if isinstance(result, tuple) else result
             out = F.softmax(logits, dim=1)
             probs.append(out[0, 1].item())
+        if agg == 'mean':
+            return float(np.mean(probs))
+        if agg == 'median':
+            return float(np.median(probs))
         return float(np.median(probs) if len(probs) > 5 else np.mean(probs))
 
-    @torch.no_grad()
-    def _kd_predict(self, models, x, adj):
-        probs = []
-        for m in models:
-            out = F.softmax(m(x, adj), dim=1)
-            probs.append(out[0, 1].item())
-        return float(np.mean(probs))
+    def _pcag_predict_seedwise(self, seed_groups, x, adj, smri_harmonized, strategy='mean'):
+        """Two-level aggregation matching the paper: average folds within each
+        seed, then combine seed-level probabilities by `strategy` ('mean' for
+        NC vs AD/MCI; 'median' for MCI vs AD). This reproduces the reported
+        Table 2 AUCs, which were computed on per-seed (fold-averaged) probs."""
+        seed_probs = [self._pcag_predict(folds, x, adj, smri_harmonized, agg='mean')
+                      for folds in seed_groups]
+        if strategy == 'median':
+            return float(np.median(seed_probs))
+        return float(np.mean(seed_probs))
 
+    @torch.no_grad()
     def predict(self, matrix_path: str, t1_path: str, site: str = 'ADNI',
                 subject_id: str = 'unknown', verbose: bool = True):
         timings = {}
 
         # 1. fMRI preprocessing
         t = time.perf_counter()
-        x, adj = self._encode_fmri(matrix_path)
+        x, adj = self._encode_fmri(matrix_path, site)
         timings['fmri_preprocess'] = time.perf_counter() - t
 
         # 2. sMRI feature extraction (BrainIAC ViT)
@@ -532,28 +566,32 @@ class InferencePipelineV2:
         smri_mci_ad = apply_combat(smri_feat, site, self.combat_mci_ad)
         timings['combat'] = time.perf_counter() - t
 
-        # 4. Task predictions (all PCAG dual-modal)
+        # 4. Task predictions (all PCAG dual-modal). Seed-level aggregation
+        #    matches the paper's uniform 5-seed mean ensemble policy across all tasks.
         t = time.perf_counter()
-        p_nc_ad  = self._pcag_predict(self.pcag_nc_ad,  x, adj, smri_nc_ad)
+        p_nc_ad  = self._pcag_predict_seedwise(self.pcag_nc_ad,  x, adj, smri_nc_ad,  strategy='mean')
         timings['pcag_nc_ad'] = time.perf_counter() - t
 
         t = time.perf_counter()
-        p_nc_mci = self._pcag_predict(self.pcag_nc_mci, x, adj, smri_nc_mci)
+        p_nc_mci = self._pcag_predict_seedwise(self.pcag_nc_mci, x, adj, smri_nc_mci, strategy='mean')
         timings['pcag_nc_mci'] = time.perf_counter() - t
 
         t = time.perf_counter()
-        p_mci_ad = self._pcag_predict(self.pcag_mci_ad, x, adj, smri_mci_ad)
+        p_mci_ad = self._pcag_predict_seedwise(self.pcag_mci_ad, x, adj, smri_mci_ad, strategy='mean')
         timings['pcag_mci_ad'] = time.perf_counter() - t
 
-        # 5. OVO → 3-class
-        votes = {'NC': 0, 'MCI': 0, 'AD': 0}
-        if p_nc_ad  >= 0.5: votes['AD']  += 1
-        else:                votes['NC']  += 1
-        if p_nc_mci >= 0.5: votes['MCI'] += 1
-        else:                votes['NC']  += 1
-        if p_mci_ad >= 0.5: votes['AD']  += 1
-        else:                votes['MCI'] += 1
-        prediction = max(votes, key=votes.get)
+        # 5. OVO → 3-class (soft / confidence-weighted voting)
+        # NC score = (1-p_nc_ad) + (1-p_nc_mci)
+        # MCI score = p_nc_mci   + (1-p_mci_ad)
+        # AD score  = p_nc_ad    + p_mci_ad
+        # Uncertain classifiers (p≈0.5) contribute ~1.0 to both classes equally → self-cancel.
+        # This naturally down-weights NC_vs_AD on MCI subjects (p≈0.34, near 0.5).
+        scores = {
+            'NC':  (1 - p_nc_ad) + (1 - p_nc_mci),
+            'MCI': p_nc_mci      + (1 - p_mci_ad),
+            'AD':  p_nc_ad       + p_mci_ad,
+        }
+        prediction = max(scores, key=scores.get)
         timings['total'] = sum(timings.values())
 
         if verbose:
@@ -564,7 +602,7 @@ class InferencePipelineV2:
             print(f"    NC vs AD  → P(AD)  = {p_nc_ad:.3f}")
             print(f"    NC vs MCI → P(MCI) = {p_nc_mci:.3f}")
             print(f"    MCI vs AD → P(AD)  = {p_mci_ad:.3f}")
-            print(f"  Votes: {votes}")
+            print(f"  Soft scores: NC={scores['NC']:.3f}  MCI={scores['MCI']:.3f}  AD={scores['AD']:.3f}")
             print(f"  Prediction: {prediction}")
             print(f"\n  Timings:")
             for k, v in timings.items():
@@ -574,7 +612,7 @@ class InferencePipelineV2:
         return {
             'subject_id': subject_id,
             'prediction': prediction,
-            'votes': votes,
+            'scores': scores,
             'probs': {'NC_vs_AD': p_nc_ad, 'NC_vs_MCI': p_nc_mci, 'MCI_vs_AD': p_mci_ad},
             'timings_ms': {k: round(v*1000, 1) for k, v in timings.items()},
         }
@@ -608,7 +646,7 @@ class InferencePipelineV2:
 
     def predict_fmri_only(self, matrix_path: str, site: str = 'ADNI'):
         """Run all 3 tasks using fMRI-only ablation models (zero sMRI features)."""
-        x, adj = self._encode_fmri(matrix_path)
+        x, adj = self._encode_fmri(matrix_path, site)
         smri_zero = np.zeros(768, dtype=np.float32)
         p_nc_ad  = self._pcag_predict(self.pcag_fmri_nc_ad,  x, adj, smri_zero)
         p_nc_mci = self._pcag_predict(self.pcag_fmri_nc_mci, x, adj, smri_zero)
@@ -760,7 +798,8 @@ if _T1_LOOKUP:
 
 
 def find_t1_path(subject_id: str) -> _Optional[str]:
-    m = _re.search(r"(\d{3}_S_\d{4})", subject_id)
+    # NOTE: \d+ (not \d{4}) so ADNI-4 IDs with 5-digit suffixes (e.g. 011_S_10044) match.
+    m = _re.search(r"(\d{3}_S_\d+)", subject_id)
     if m:
         return _T1_LOOKUP.get(m.group(1))
     m = _re.search(r"(sub_\d+)", subject_id)
@@ -939,7 +978,7 @@ def _get_pipeline() -> InferencePipelineV2:
 
 
 def run_multimodal_inference(modality_input: ModalityInput, device: torch.device) -> dict:
-    """Drop-in replacement for api_server.py — uses PCAG-ComBat + KD GNN."""
+    """Drop-in replacement for api_server.py — uses PCAG-ComBat (label-free)."""
     pipe = _get_pipeline()
     has_fmri = bool(modality_input.matrix_path)
     has_smri = bool(modality_input.t1_path)

@@ -67,8 +67,8 @@ unified_subject_split_trainonly.json
 # ============================================================
 # 新增：大型資料目錄（含病患 ID 的前處理結果）
 # ============================================================
-downstream/fmri_combat_v2*/
-fmri_combat_v2*/
+downstream/fmri_combat_*/
+fmri_combat_*/
 downstream/results/
 datasets/
 fMRI/
@@ -94,3 +94,18 @@ EXECUTION_PLAN.md
 downstream/EXECUTION_PLAN.md
 downstream/OVERNIGHT_PLAN.md
 downstream/docs/
+
+# ============================================================
+# Paper / 論文草稿（投稿前不公開）
+# ============================================================
+downstream/paper_context/
+
+# ============================================================
+# 模型 checkpoints（2.5 GB，過大）
+# ============================================================
+downstream/checkpoints/
+
+# ============================================================
+# 含病患 ID 的個人 case report
+# ============================================================
+downstream/case_report_*.txt

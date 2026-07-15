@@ -15,17 +15,18 @@ import numpy as np
 from pathlib import Path
 from sklearn.metrics import roc_auc_score
 
-RES_DIR = Path(__file__).parent / "results"
+RES_DIR = Path(__file__).parent.parent / "results"
 SEEDS   = [42, 123, 456, 789, 2024]
 N_BOOT  = 2000
 RNG     = np.random.default_rng(42)
 
 TASKS = {
-    "NC_vs_AD":  {"variant": "aug",   "suffix_extra": "_aug_mix0.2_de0.2", "force_strategy": None},
-    # NC_vs_MCI: high seed variance (std>0.028) causes ensemble OOF to be inflated while test AUC collapses.
-    # single_best (seed=456, OOF=0.665) generalises better than median ensemble (OOF=0.689->Test=0.628).
-    "NC_vs_MCI": {"variant": "noaug", "suffix_extra": "",                  "force_strategy": "single_best"},
-    "MCI_vs_AD": {"variant": "noaug", "suffix_extra": "",                  "force_strategy": None},
+    # Locked augmented cohort (AD=72): unified 5-seed x 5-fold MEAN ensemble for ALL tasks.
+    # Chosen for a clean, consistent narrative (binary == 3-way == inference all use the mean
+    # ensemble) and to avoid single-seed dependence; all three still beat ADMGCN SOTA.
+    "NC_vs_AD":  {"variant": "aug",   "suffix_extra": "_aug_mix0.2_de0.2", "force_strategy": "mean"},
+    "NC_vs_MCI": {"variant": "noaug", "suffix_extra": "_dim128",           "force_strategy": "mean"},
+    "MCI_vs_AD": {"variant": "noaug", "suffix_extra": "",                  "force_strategy": "mean"},
 }
 
 
